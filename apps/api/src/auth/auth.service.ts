@@ -6,6 +6,7 @@ import {
 import { PrismaService } from "../prisma/prisma.service";
 import { LoginDto } from "./dto/login.dto";
 import { SessionPayload } from "./auth.types";
+import { SESSION_TTL_SECONDS } from "./session.constants";
 
 @Injectable()
 export class AuthService {
@@ -66,6 +67,7 @@ export class AuthService {
       };
     }
 
+    const nowSeconds = Math.floor(Date.now() / 1000);
     return {
       requiresOrganizationSelection: false as const,
       user: {
@@ -77,6 +79,8 @@ export class AuthService {
       session: {
         userId: user.id,
         organizationId: selectedMembership.organizationId,
+        iat: nowSeconds,
+        exp: nowSeconds + SESSION_TTL_SECONDS,
       } satisfies SessionPayload,
     };
   }

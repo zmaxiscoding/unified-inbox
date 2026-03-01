@@ -24,6 +24,7 @@ export class SessionAuthGuard implements CanActivate {
     const session = this.sessionService.parseCookie(request.headers.cookie);
 
     if (!session) {
+      response.setHeader("Set-Cookie", this.sessionService.clearSessionCookie());
       throw new UnauthorizedException("Authentication required");
     }
 

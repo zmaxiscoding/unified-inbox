@@ -34,10 +34,33 @@ describe("SessionAuthGuard", () => {
     sessionService.parseCookie.mockReturnValue({
       userId: "u1",
       organizationId: "org_1",
+      iat: 1,
+      exp: 2,
     });
     authService.getSessionDetails.mockRejectedValue(
       new UnauthorizedException("Invalid session"),
     );
+
+    const context = {
+      switchToHttp: () => ({
+        getRequest: () => request,
+        getResponse: () => response,
+      }),
+    } as ExecutionContext;
+
+    await expect(guard.canActivate(context)).rejects.toBeInstanceOf(
+      UnauthorizedException,
+    );
+    expect(response.setHeader).toHaveBeenCalledWith(
+      "Set-Cookie",
+      "ui_session=; Max-Age=0",
+    );
+  });
+
+  it("should reject and clear cookie when session is expired or invalid", async () => {
+    const request = { headers: { cookie: "ui_session=abc" } };
+    const response = { setHeader: jest.fn() };
+    sessionService.parseCookie.mockReturnValue(null);
 
     const context = {
       switchToHttp: () => ({
@@ -60,7 +83,12 @@ describe("SessionAuthGuard", () => {
       headers: { cookie: "ui_session=abc" },
     };
     const response = { setHeader: jest.fn() };
-    const parsedSession = { userId: "u1", organizationId: "org_1" };
+    const parsedSession = {
+      userId: "u1",
+      organizationId: "org_1",
+      iat: 1,
+      exp: 2,
+    };
 
     sessionService.parseCookie.mockReturnValue(parsedSession);
     authService.getSessionDetails.mockResolvedValue({

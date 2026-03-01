@@ -16,6 +16,8 @@ describe("ConversationsController", () => {
   const session: SessionPayload = {
     userId: "user_1",
     organizationId: "org_1",
+    iat: 1,
+    exp: 2,
   };
 
   beforeEach(async () => {

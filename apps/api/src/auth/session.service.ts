@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { SessionPayload } from "./auth.types";
+import { SESSION_TTL_SECONDS } from "./session.constants";
 
 export const SESSION_COOKIE_NAME = "ui_session";
 
@@ -21,7 +22,7 @@ export class SessionService {
     const value = this.signPayload(payload);
     const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
 
-    return `${SESSION_COOKIE_NAME}=${value}; HttpOnly; Path=/; SameSite=Lax; Max-Age=604800${secure}`;
+    return `${SESSION_COOKIE_NAME}=${value}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_TTL_SECONDS}${secure}`;
   }
 
   clearSessionCookie() {
@@ -74,6 +75,13 @@ export class SessionService {
       ) as SessionPayload;
 
       if (!parsed.userId || !parsed.organizationId) return null;
+      if (typeof parsed.exp !== "number" || !Number.isFinite(parsed.exp)) {
+        return null;
+      }
+
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      if (parsed.exp < nowSeconds) return null;
+
       return parsed;
     } catch {
       return null;
