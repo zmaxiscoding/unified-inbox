@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type AssignedMembership = {
@@ -15,6 +15,17 @@ type AssignedMembership = {
 type Tag = {
   id: string;
   name: string;
+};
+
+type Note = {
+  id: string;
+  body: string;
+  createdAt: string;
+  author: {
+    id: string;
+    name: string;
+    email: string;
+  };
 };
 
 type Conversation = {
@@ -102,9 +113,15 @@ export default function InboxPage() {
   const [isAssigning, setIsAssigning] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [isAddingTag, setIsAddingTag] = useState(false);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [noteInput, setNoteInput] = useState("");
+  const [isLoadingNotes, setIsLoadingNotes] = useState(false);
+  const [isAddingNote, setIsAddingNote] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const activeConversationRef = useRef<string | null>(null);
 
   const selectedConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
@@ -207,6 +224,7 @@ export default function InboxPage() {
       const response = await fetch(`/api/conversations/${conversationId}/messages`, {
         cache: "no-store",
       });
+      if (activeConversationRef.current !== conversationId) return;
       if (response.status === 401) {
         router.replace("/login");
         return;
@@ -216,11 +234,46 @@ export default function InboxPage() {
       }
 
       const data = (await response.json()) as Message[];
+      if (activeConversationRef.current !== conversationId) return;
       setMessages(data);
     } catch {
-      setErrorMessage("Mesajlar alınırken hata oluştu.");
+      if (activeConversationRef.current === conversationId) {
+        setErrorMessage("Mesajlar alınırken hata oluştu.");
+      }
     } finally {
-      setIsLoadingMessages(false);
+      if (activeConversationRef.current === conversationId) {
+        setIsLoadingMessages(false);
+      }
+    }
+  }, [router]);
+
+  const fetchNotes = useCallback(async (conversationId: string) => {
+    setIsLoadingNotes(true);
+
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}/notes`, {
+        cache: "no-store",
+      });
+      if (activeConversationRef.current !== conversationId) return;
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Notes fetch failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as Note[];
+      if (activeConversationRef.current !== conversationId) return;
+      setNotes(data);
+    } catch {
+      if (activeConversationRef.current === conversationId) {
+        setErrorMessage("Notlar alınırken hata oluştu.");
+      }
+    } finally {
+      if (activeConversationRef.current === conversationId) {
+        setIsLoadingNotes(false);
+      }
     }
   }, [router]);
 
@@ -239,9 +292,21 @@ export default function InboxPage() {
   }, [fetchConversations, fetchMembers, isCheckingSession, session]);
 
   useEffect(() => {
-    if (!selectedConversationId) return;
+    activeConversationRef.current = selectedConversationId;
+    if (!selectedConversationId) {
+      setMessages([]);
+      setNotes([]);
+      setNoteInput("");
+      setIsLoadingMessages(false);
+      setIsLoadingNotes(false);
+      return;
+    }
+    setMessages([]);
+    setNotes([]);
+    setNoteInput("");
     void fetchMessages(selectedConversationId);
-  }, [fetchMessages, selectedConversationId]);
+    void fetchNotes(selectedConversationId);
+  }, [fetchMessages, fetchNotes, selectedConversationId]);
 
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -355,6 +420,43 @@ export default function InboxPage() {
     if (event.key === "Enter") {
       event.preventDefault();
       void handleAddTag();
+    }
+  };
+
+  const handleAddNote = async () => {
+    const body = noteInput.trim();
+    const conversationId = selectedConversationId;
+    if (!conversationId || !body || isAddingNote) return;
+
+    setIsAddingNote(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Add note failed: ${response.status}`);
+      }
+
+      const newNote = (await response.json()) as Note;
+      if (activeConversationRef.current === conversationId) {
+        setNotes((current) => [...current, newNote]);
+      }
+      setNoteInput("");
+    } catch {
+      if (activeConversationRef.current === conversationId) {
+        setErrorMessage("Not eklenemedi.");
+      }
+    } finally {
+      setIsAddingNote(false);
     }
   };
 
@@ -545,6 +647,55 @@ export default function InboxPage() {
                 disabled={isAddingTag}
                 className="h-7 w-28 rounded border border-slate-200 px-2 text-xs outline-none focus:border-slate-400 disabled:bg-slate-50"
               />
+            </div>
+          ) : null}
+
+          {selectedConversation ? (
+            <div className="border-b border-slate-200 px-6 py-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase">Notlar</h3>
+              </div>
+              {isLoadingNotes ? (
+                <p className="mt-2 text-xs text-slate-400">Yükleniyor...</p>
+              ) : notes.length > 0 ? (
+                <div className="mt-2 max-h-32 space-y-2 overflow-y-auto">
+                  {notes.map((note) => (
+                    <div
+                      key={note.id}
+                      className="rounded border border-slate-100 bg-slate-50 px-3 py-2"
+                    >
+                      <p className="text-xs text-slate-700">{note.body}</p>
+                      <p className="mt-1 text-[10px] text-slate-400">
+                        {note.author.name} &bull; {formatTimestamp(note.createdAt)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="text"
+                  value={noteInput}
+                  onChange={(event) => setNoteInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleAddNote();
+                    }
+                  }}
+                  placeholder="Not ekle..."
+                  disabled={isAddingNote}
+                  className="h-7 flex-1 rounded border border-slate-200 px-2 text-xs outline-none focus:border-slate-400 disabled:bg-slate-50"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleAddNote()}
+                  disabled={!noteInput.trim() || isAddingNote}
+                  className="h-7 rounded bg-slate-900 px-3 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {isAddingNote ? "..." : "Ekle"}
+                </button>
+              </div>
             </div>
           ) : null}
 

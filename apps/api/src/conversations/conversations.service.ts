@@ -254,6 +254,79 @@ export class ConversationsService {
     };
   }
 
+  async listConversationNotes(
+    organizationId: string,
+    conversationId: string,
+  ) {
+    const conversation = await this.getConversationInOrganization(
+      organizationId,
+      conversationId,
+    );
+
+    const notes = await this.prisma.note.findMany({
+      where: { conversationId: conversation.id },
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        body: true,
+        createdAt: true,
+        author: {
+          select: { id: true, name: true, email: true },
+        },
+      },
+    });
+
+    return notes.map((note) => ({
+      id: note.id,
+      body: note.body,
+      createdAt: note.createdAt,
+      author: {
+        id: note.author.id,
+        name: note.author.name,
+        email: note.author.email,
+      },
+    }));
+  }
+
+  async createConversationNote(
+    organizationId: string,
+    userId: string,
+    conversationId: string,
+    rawBody: string,
+  ) {
+    const conversation = await this.getConversationInOrganization(
+      organizationId,
+      conversationId,
+    );
+
+    const note = await this.prisma.note.create({
+      data: {
+        body: rawBody.trim(),
+        conversationId: conversation.id,
+        authorId: userId,
+      },
+      select: {
+        id: true,
+        body: true,
+        createdAt: true,
+        author: {
+          select: { id: true, name: true, email: true },
+        },
+      },
+    });
+
+    return {
+      id: note.id,
+      body: note.body,
+      createdAt: note.createdAt,
+      author: {
+        id: note.author.id,
+        name: note.author.name,
+        email: note.author.email,
+      },
+    };
+  }
+
   async listConversationTags(
     organizationId: string,
     conversationId: string,

@@ -98,6 +98,14 @@ curl -b cookie.txt -X POST http://localhost:3001/conversations/<conversationId>/
 
 # Konuşmadan etiket kaldır
 curl -b cookie.txt -X DELETE http://localhost:3001/conversations/<conversationId>/tags/<tagId>
+
+# Konuşma notlarını listele
+curl -b cookie.txt http://localhost:3001/conversations/<conversationId>/notes
+
+# Konuşmaya not ekle
+curl -b cookie.txt -X POST http://localhost:3001/conversations/<conversationId>/notes \
+  -H "Content-Type: application/json" \
+  -d '{"body":"Müşteri VIP, öncelikli destek."}'
 ```
 
 ## UI Nasıl Çalıştırılır
