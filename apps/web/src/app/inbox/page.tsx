@@ -75,6 +75,7 @@ const CHANNEL_LABELS: Record<string, string> = {
 };
 
 const UNASSIGNED_VALUE = "__UNASSIGNED__";
+const ENABLE_DEV_ENDPOINTS = process.env.NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS === "true";
 
 function formatTimestamp(value: string | null) {
   if (!value) return "-";
@@ -120,6 +121,10 @@ export default function InboxPage() {
   const [isSending, setIsSending] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [simulateCustomerDisplay, setSimulateCustomerDisplay] = useState("");
+  const [simulateText, setSimulateText] = useState("");
+  const [isSimulatingInbound, setIsSimulatingInbound] = useState(false);
+  const [simulateInboundMessage, setSimulateInboundMessage] = useState<string | null>(null);
 
   const activeConversationRef = useRef<string | null>(null);
 
@@ -341,6 +346,53 @@ export default function InboxPage() {
     }
   };
 
+  const handleSimulateInbound = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!ENABLE_DEV_ENDPOINTS || isSimulatingInbound) return;
+
+    const text = simulateText.trim();
+    const customerDisplay = simulateCustomerDisplay.trim();
+    if (!text) return;
+
+    setIsSimulatingInbound(true);
+    setSimulateInboundMessage(null);
+
+    try {
+      const payload: { text: string; customerDisplay?: string } = { text };
+      if (customerDisplay) {
+        payload.customerDisplay = customerDisplay;
+      }
+
+      const response = await fetch("/api/dev/simulate-inbound", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        setSimulateInboundMessage(`Simulate inbound başarısız (${response.status}).`);
+        return;
+      }
+
+      setSimulateText("");
+      setSimulateInboundMessage("Inbound mesaj simüle edildi.");
+      const activeConversationId = selectedConversationId;
+      await fetchConversations();
+      if (activeConversationId) {
+        await fetchMessages(activeConversationId);
+      }
+    } catch {
+      setSimulateInboundMessage("Simulate inbound başarısız (network).");
+    } finally {
+      setIsSimulatingInbound(false);
+    }
+  };
+
   const updateConversationTags = useCallback(
     (conversationId: string, tags: Tag[]) => {
       setConversations((current) =>
@@ -517,6 +569,44 @@ export default function InboxPage() {
 
   return (
     <main className="min-h-screen bg-slate-100 p-4 md:p-6">
+      {ENABLE_DEV_ENDPOINTS ? (
+        <section className="mx-auto mb-3 w-full max-w-6xl rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Dev only</p>
+          <p className="text-sm font-medium text-amber-900">Simulate inbound</p>
+          <form
+            onSubmit={handleSimulateInbound}
+            className="mt-2 flex flex-col gap-2 md:flex-row md:items-center"
+          >
+            <input
+              type="text"
+              value={simulateCustomerDisplay}
+              onChange={(event) => setSimulateCustomerDisplay(event.target.value)}
+              placeholder="customerDisplay (optional)"
+              className="h-9 rounded-lg border border-amber-300 bg-white px-3 text-sm outline-none focus:border-amber-500 md:w-64"
+              disabled={isSimulatingInbound}
+            />
+            <input
+              type="text"
+              value={simulateText}
+              onChange={(event) => setSimulateText(event.target.value)}
+              placeholder="text (required)"
+              required
+              className="h-9 flex-1 rounded-lg border border-amber-300 bg-white px-3 text-sm outline-none focus:border-amber-500"
+              disabled={isSimulatingInbound}
+            />
+            <button
+              type="submit"
+              disabled={!simulateText.trim() || isSimulatingInbound}
+              className="h-9 rounded-lg bg-amber-600 px-4 text-sm font-medium text-white hover:bg-amber-500 disabled:cursor-not-allowed disabled:bg-amber-300"
+            >
+              {isSimulatingInbound ? "Sending..." : "Send"}
+            </button>
+          </form>
+          {simulateInboundMessage ? (
+            <p className="mt-2 text-xs text-amber-800">{simulateInboundMessage}</p>
+          ) : null}
+        </section>
+      ) : null}
       <div className="mx-auto flex h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:h-[calc(100vh-3rem)] md:flex-row">
         <aside className="h-[42%] w-full border-b border-slate-200 md:h-auto md:w-[360px] md:border-r md:border-b-0">
           <div className="border-b border-slate-200 px-5 py-4">
