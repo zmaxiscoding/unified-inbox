@@ -293,7 +293,14 @@ export default function InboxPage() {
 
   useEffect(() => {
     activeConversationRef.current = selectedConversationId;
-    if (!selectedConversationId) return;
+    if (!selectedConversationId) {
+      setMessages([]);
+      setNotes([]);
+      setNoteInput("");
+      setIsLoadingMessages(false);
+      setIsLoadingNotes(false);
+      return;
+    }
     setMessages([]);
     setNotes([]);
     setNoteInput("");
@@ -418,13 +425,14 @@ export default function InboxPage() {
 
   const handleAddNote = async () => {
     const body = noteInput.trim();
-    if (!selectedConversationId || !body || isAddingNote) return;
+    const conversationId = selectedConversationId;
+    if (!conversationId || !body || isAddingNote) return;
 
     setIsAddingNote(true);
     setErrorMessage(null);
 
     try {
-      const response = await fetch(`/api/conversations/${selectedConversationId}/notes`, {
+      const response = await fetch(`/api/conversations/${conversationId}/notes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ body }),
@@ -439,10 +447,14 @@ export default function InboxPage() {
       }
 
       const newNote = (await response.json()) as Note;
-      setNotes((current) => [...current, newNote]);
+      if (activeConversationRef.current === conversationId) {
+        setNotes((current) => [...current, newNote]);
+      }
       setNoteInput("");
     } catch {
-      setErrorMessage("Not eklenemedi.");
+      if (activeConversationRef.current === conversationId) {
+        setErrorMessage("Not eklenemedi.");
+      }
     } finally {
       setIsAddingNote(false);
     }
