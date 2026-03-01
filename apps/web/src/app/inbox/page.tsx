@@ -381,10 +381,10 @@ export default function InboxPage() {
 
       setSimulateText("");
       setSimulateInboundMessage("Inbound mesaj simüle edildi.");
-      const activeConversationId = selectedConversationId;
       await fetchConversations();
-      if (activeConversationId) {
-        await fetchMessages(activeConversationId);
+      const currentConversationId = activeConversationRef.current;
+      if (currentConversationId) {
+        await fetchMessages(currentConversationId);
       }
     } catch {
       setSimulateInboundMessage("Simulate inbound başarısız (network).");
