@@ -80,13 +80,6 @@ export class TeamService {
     email: string,
     role: Role,
   ) {
-    const actorMembership = await this.getActorMembership(
-      this.prisma,
-      organizationId,
-      actorUserId,
-    );
-    this.assertOwner(actorMembership);
-
     const normalizedEmail = email.trim().toLowerCase();
     const now = new Date();
 
@@ -100,6 +93,15 @@ export class TeamService {
 
     try {
       const invitation = await this.prisma.$transaction(async (tx) => {
+        await this.lockOrganizationMemberships(tx, organizationId);
+
+        const actorMembership = await this.getActorMembership(
+          tx,
+          organizationId,
+          actorUserId,
+        );
+        this.assertOwner(actorMembership);
+
         // Expired pending invites are auto-revoked so a new invite can be issued.
         await tx.invitation.updateMany({
           where: {
@@ -334,39 +336,43 @@ export class TeamService {
     actorUserId: string,
     inviteId: string,
   ) {
-    const actorMembership = await this.getActorMembership(
-      this.prisma,
-      organizationId,
-      actorUserId,
-    );
-    this.assertOwner(actorMembership);
+    await this.prisma.$transaction(async (tx) => {
+      await this.lockOrganizationMemberships(tx, organizationId);
 
-    const invitation = await this.prisma.invitation.findFirst({
-      where: {
-        id: inviteId,
+      const actorMembership = await this.getActorMembership(
+        tx,
         organizationId,
-        acceptedAt: null,
-        revokedAt: null,
-      },
-    });
+        actorUserId,
+      );
+      this.assertOwner(actorMembership);
 
-    if (!invitation) {
-      throw new NotFoundException("Invitation not found");
-    }
+      const invitation = await tx.invitation.findFirst({
+        where: {
+          id: inviteId,
+          organizationId,
+          acceptedAt: null,
+          revokedAt: null,
+        },
+      });
 
-    await this.prisma.invitation.update({
-      where: { id: invitation.id },
-      data: { revokedAt: new Date() },
-    });
+      if (!invitation) {
+        throw new NotFoundException("Invitation not found");
+      }
 
-    await this.prisma.auditLog.create({
-      data: {
-        action: "invite.revoked",
-        targetId: invitation.id,
-        metadata: { email: invitation.email },
-        organizationId,
-        actorId: actorUserId,
-      },
+      await tx.invitation.update({
+        where: { id: invitation.id },
+        data: { revokedAt: new Date() },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          action: "invite.revoked",
+          targetId: invitation.id,
+          metadata: { email: invitation.email },
+          organizationId,
+          actorId: actorUserId,
+        },
+      });
     });
   }
 
