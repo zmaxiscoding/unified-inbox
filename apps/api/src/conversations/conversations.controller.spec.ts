@@ -7,6 +7,7 @@ import { ConversationsService } from "./conversations.service";
 import { AddTagDto } from "./dto/add-tag.dto";
 import { AssignConversationDto } from "./dto/assign-conversation.dto";
 import { CreateMessageDto } from "./dto/create-message.dto";
+import { CreateNoteDto } from "./dto/create-note.dto";
 
 const VALID_CUID_MEMBERSHIP_ID = "cjfne4n3f0000qzrmn831i7rn";
 
@@ -21,6 +22,8 @@ describe("ConversationsController", () => {
     listConversationTags: jest.Mock;
     addTagToConversation: jest.Mock;
     removeTagFromConversation: jest.Mock;
+    listConversationNotes: jest.Mock;
+    createConversationNote: jest.Mock;
   };
   const session: SessionPayload = {
     userId: "user_1",
@@ -39,6 +42,8 @@ describe("ConversationsController", () => {
       listConversationTags: jest.fn(),
       addTagToConversation: jest.fn(),
       removeTagFromConversation: jest.fn(),
+      listConversationNotes: jest.fn(),
+      createConversationNote: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -294,5 +299,107 @@ describe("ConversationsController", () => {
     await expect(
       pipe.transform({ name: "VIP" }, metadata),
     ).resolves.toEqual({ name: "VIP" });
+  });
+
+  // ── Note endpoint tests ─────────────────────────────────
+
+  it("should list notes via service", async () => {
+    service.listConversationNotes.mockResolvedValue([
+      {
+        id: "n1",
+        body: "Müşteri VIP",
+        createdAt: "2026-03-01T10:00:00.000Z",
+        author: { id: "usr_1", name: "Zeynep Demir", email: "agent@acme.com" },
+      },
+    ]);
+
+    const result = await controller.getConversationNotes("c1", session);
+
+    expect(result).toEqual([
+      {
+        id: "n1",
+        body: "Müşteri VIP",
+        createdAt: "2026-03-01T10:00:00.000Z",
+        author: { id: "usr_1", name: "Zeynep Demir", email: "agent@acme.com" },
+      },
+    ]);
+    expect(service.listConversationNotes).toHaveBeenCalledWith("org_1", "c1");
+  });
+
+  it("should create note via service", async () => {
+    service.createConversationNote.mockResolvedValue({
+      id: "n1",
+      body: "İade talebi var",
+      createdAt: "2026-03-01T11:00:00.000Z",
+      author: { id: "user_1", name: "Ali Yılmaz", email: "owner@acme.com" },
+    });
+
+    const result = await controller.createNote(
+      "c1",
+      { body: "İade talebi var" },
+      session,
+    );
+
+    expect(result).toEqual({
+      id: "n1",
+      body: "İade talebi var",
+      createdAt: "2026-03-01T11:00:00.000Z",
+      author: { id: "user_1", name: "Ali Yılmaz", email: "owner@acme.com" },
+    });
+    expect(service.createConversationNote).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      "c1",
+      "İade talebi var",
+    );
+  });
+
+  it("should reject blank note body", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: CreateNoteDto,
+      data: "",
+    };
+
+    await expect(pipe.transform({ body: "   " }, metadata)).rejects.toThrow();
+  });
+
+  it("should reject note payload with unknown fields", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: CreateNoteDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ body: "test", extra: "nope" }, metadata),
+    ).rejects.toThrow();
+  });
+
+  it("should accept valid note body", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: CreateNoteDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ body: "Bu bir not" }, metadata),
+    ).resolves.toEqual({ body: "Bu bir not" });
   });
 });

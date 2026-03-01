@@ -29,6 +29,10 @@ describe("ConversationsService", () => {
       upsert: jest.Mock;
       delete: jest.Mock;
     };
+    note: {
+      findMany: jest.Mock;
+      create: jest.Mock;
+    };
   };
 
   beforeEach(() => {
@@ -53,6 +57,10 @@ describe("ConversationsService", () => {
         findUnique: jest.fn(),
         upsert: jest.fn(),
         delete: jest.fn(),
+      },
+      note: {
+        findMany: jest.fn(),
+        create: jest.fn(),
       },
     };
 
@@ -324,5 +332,85 @@ describe("ConversationsService", () => {
       { id: "t1", name: "vip" },
       { id: "t2", name: "iade" },
     ]);
+  });
+
+  // ── Note service tests ──────────────────────────────────
+
+  it("should list conversation notes", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.note.findMany.mockResolvedValue([
+      {
+        id: "n1",
+        body: "Müşteri VIP",
+        createdAt: new Date("2026-03-01T10:00:00.000Z"),
+        author: { id: "usr_1", name: "Zeynep Demir", email: "agent@acme.com" },
+      },
+    ]);
+
+    const result = await service.listConversationNotes("org_1", "conv_1");
+
+    expect(result).toEqual([
+      {
+        id: "n1",
+        body: "Müşteri VIP",
+        createdAt: new Date("2026-03-01T10:00:00.000Z"),
+        author: { id: "usr_1", name: "Zeynep Demir", email: "agent@acme.com" },
+      },
+    ]);
+  });
+
+  it("should create a conversation note with trimmed body", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.note.create.mockResolvedValue({
+      id: "n1",
+      body: "İade talebi var",
+      createdAt: new Date("2026-03-01T11:00:00.000Z"),
+      author: { id: "usr_1", name: "Zeynep Demir", email: "agent@acme.com" },
+    });
+
+    const result = await service.createConversationNote(
+      "org_1",
+      "usr_1",
+      "conv_1",
+      "  İade talebi var  ",
+    );
+
+    expect(result).toEqual({
+      id: "n1",
+      body: "İade talebi var",
+      createdAt: new Date("2026-03-01T11:00:00.000Z"),
+      author: { id: "usr_1", name: "Zeynep Demir", email: "agent@acme.com" },
+    });
+    expect(prisma.note.create).toHaveBeenCalledWith({
+      data: {
+        body: "İade talebi var",
+        conversationId: "conv_1",
+        authorId: "usr_1",
+      },
+      select: {
+        id: true,
+        body: true,
+        createdAt: true,
+        author: {
+          select: { id: true, name: true, email: true },
+        },
+      },
+    });
+  });
+
+  it("should return 404 when listing notes for cross-tenant conversation", async () => {
+    prisma.conversation.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.listConversationNotes("org_other", "conv_1"),
+    ).rejects.toEqual(new NotFoundException("Conversation not found"));
+  });
+
+  it("should return 404 when creating note for cross-tenant conversation", async () => {
+    prisma.conversation.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.createConversationNote("org_other", "usr_1", "conv_1", "test"),
+    ).rejects.toEqual(new NotFoundException("Conversation not found"));
   });
 });

@@ -17,6 +17,7 @@ import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { AddTagDto } from "./dto/add-tag.dto";
 import { AssignConversationDto } from "./dto/assign-conversation.dto";
 import { CreateMessageDto } from "./dto/create-message.dto";
+import { CreateNoteDto } from "./dto/create-note.dto";
 import { ConversationsService } from "./conversations.service";
 
 @Controller("conversations")
@@ -104,6 +105,38 @@ export class ConversationsController {
       session.organizationId,
       id,
       tagId,
+    );
+  }
+
+  @Get(":id/notes")
+  getConversationNotes(
+    @Param("id") id: string,
+    @Session() session: SessionPayload,
+  ) {
+    return this.conversationsService.listConversationNotes(
+      session.organizationId,
+      id,
+    );
+  }
+
+  @Post(":id/notes")
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  )
+  createNote(
+    @Param("id") id: string,
+    @Body() body: CreateNoteDto,
+    @Session() session: SessionPayload,
+  ) {
+    return this.conversationsService.createConversationNote(
+      session.organizationId,
+      session.userId,
+      id,
+      body.body,
     );
   }
 

@@ -17,6 +17,17 @@ type Tag = {
   name: string;
 };
 
+type Note = {
+  id: string;
+  body: string;
+  createdAt: string;
+  author: {
+    id: string;
+    name: string;
+    email: string;
+  };
+};
+
 type Conversation = {
   id: string;
   customerDisplay: string;
@@ -102,6 +113,10 @@ export default function InboxPage() {
   const [isAssigning, setIsAssigning] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [isAddingTag, setIsAddingTag] = useState(false);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [noteInput, setNoteInput] = useState("");
+  const [isLoadingNotes, setIsLoadingNotes] = useState(false);
+  const [isAddingNote, setIsAddingNote] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -224,6 +239,30 @@ export default function InboxPage() {
     }
   }, [router]);
 
+  const fetchNotes = useCallback(async (conversationId: string) => {
+    setIsLoadingNotes(true);
+
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}/notes`, {
+        cache: "no-store",
+      });
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Notes fetch failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as Note[];
+      setNotes(data);
+    } catch {
+      setErrorMessage("Notlar alınırken hata oluştu.");
+    } finally {
+      setIsLoadingNotes(false);
+    }
+  }, [router]);
+
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
     router.replace("/login");
@@ -241,7 +280,8 @@ export default function InboxPage() {
   useEffect(() => {
     if (!selectedConversationId) return;
     void fetchMessages(selectedConversationId);
-  }, [fetchMessages, selectedConversationId]);
+    void fetchNotes(selectedConversationId);
+  }, [fetchMessages, fetchNotes, selectedConversationId]);
 
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -355,6 +395,38 @@ export default function InboxPage() {
     if (event.key === "Enter") {
       event.preventDefault();
       void handleAddTag();
+    }
+  };
+
+  const handleAddNote = async () => {
+    const body = noteInput.trim();
+    if (!selectedConversationId || !body || isAddingNote) return;
+
+    setIsAddingNote(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch(`/api/conversations/${selectedConversationId}/notes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body }),
+      });
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Add note failed: ${response.status}`);
+      }
+
+      const newNote = (await response.json()) as Note;
+      setNotes((current) => [...current, newNote]);
+      setNoteInput("");
+    } catch {
+      setErrorMessage("Not eklenemedi.");
+    } finally {
+      setIsAddingNote(false);
     }
   };
 
@@ -545,6 +617,55 @@ export default function InboxPage() {
                 disabled={isAddingTag}
                 className="h-7 w-28 rounded border border-slate-200 px-2 text-xs outline-none focus:border-slate-400 disabled:bg-slate-50"
               />
+            </div>
+          ) : null}
+
+          {selectedConversation ? (
+            <div className="border-b border-slate-200 px-6 py-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xs font-semibold text-slate-500 uppercase">Notlar</h3>
+              </div>
+              {isLoadingNotes ? (
+                <p className="mt-2 text-xs text-slate-400">Yükleniyor...</p>
+              ) : notes.length > 0 ? (
+                <div className="mt-2 max-h-32 space-y-2 overflow-y-auto">
+                  {notes.map((note) => (
+                    <div
+                      key={note.id}
+                      className="rounded border border-slate-100 bg-slate-50 px-3 py-2"
+                    >
+                      <p className="text-xs text-slate-700">{note.body}</p>
+                      <p className="mt-1 text-[10px] text-slate-400">
+                        {note.author.name} &bull; {formatTimestamp(note.createdAt)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="text"
+                  value={noteInput}
+                  onChange={(event) => setNoteInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void handleAddNote();
+                    }
+                  }}
+                  placeholder="Not ekle..."
+                  disabled={isAddingNote}
+                  className="h-7 flex-1 rounded border border-slate-200 px-2 text-xs outline-none focus:border-slate-400 disabled:bg-slate-50"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleAddNote()}
+                  disabled={!noteInput.trim() || isAddingNote}
+                  className="h-7 rounded bg-slate-900 px-3 text-xs font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {isAddingNote ? "..." : "Ekle"}
+                </button>
+              </div>
             </div>
           ) : null}
 
