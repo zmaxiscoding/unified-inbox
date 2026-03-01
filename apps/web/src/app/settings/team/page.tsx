@@ -54,9 +54,12 @@ export default function TeamSettingsPage() {
 
   const fetchSession = useCallback(async () => {
     const response = await fetch("/api/auth/session", { cache: "no-store" });
-    if (!response.ok) {
+    if (response.status === 401) {
       router.replace("/login");
       return null;
+    }
+    if (!response.ok) {
+      throw new Error("Oturum doğrulanamadı.");
     }
 
     return (await response.json()) as Session;
