@@ -53,6 +53,21 @@ pnpm db:seed          # Seed verisini yükler
 pnpm db:reset         # DB'yi sıfırlar ve migration'ları yeniden uygular
 ```
 
+## API Örnekleri
+
+```bash
+# Konuşmaları listele
+curl http://localhost:3001/conversations
+
+# Konuşma mesajlarını listele
+curl http://localhost:3001/conversations/<conversationId>/messages
+
+# Konuşmaya outbound mesaj ekle
+curl -X POST http://localhost:3001/conversations/<conversationId>/messages \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Merhaba, siparişiniz bugün kargoya veriliyor."}'
+```
+
 ## Proje Yapısı
 
 ```
