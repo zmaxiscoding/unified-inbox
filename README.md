@@ -147,6 +147,9 @@ pnpm dev
 - Login: `http://localhost:3000/login`
 - UI: `http://localhost:3000/inbox`
 - API proxy: web tarafı `/api/*` isteklerini `NEXT_PUBLIC_API_URL` (varsayılan `http://localhost:3001`) adresine yönlendirir.
+- Demo simulate inbound kutusunu açmak için `apps/web/.env` içine `NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS=true` ekleyin.
+- `NEXT_PUBLIC_*` değişkenleri build-time inline edilir; bu flag build sırasında set edilmelidir.
+- Prod build'lerde `NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS` set etmeyin (veya `false` bırakın), UI görünmez.
 - Tek organization üyeliğinde login sonrası otomatik org seçilir; çoklu üyelikte UI org seçimi ister.
 - Inbox sağ panel header'ında assign dropdown ile konuşma atama/atama kaldırma yapılır.
 
