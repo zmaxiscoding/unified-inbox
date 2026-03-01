@@ -25,8 +25,9 @@ pnpm install
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env
 
-# 5. Veritabanı migration'ını çalıştır
-pnpm --filter api prisma migrate dev --name init
+# 5. Veritabanı migration + seed
+pnpm db:migrate
+pnpm db:seed
 
 # 6. Geliştirme sunucularını başlat (web + api paralel)
 pnpm dev
@@ -42,10 +43,14 @@ Uygulama adresleri:
 ## Komutlar
 
 ```bash
-pnpm dev      # web + api paralel başlatır
-pnpm build    # web + api production build
-pnpm lint     # tüm workspace'lerde lint çalıştırır
-pnpm test     # tüm workspace'lerde test çalıştırır
+pnpm dev              # web + api paralel başlatır
+pnpm build            # web + api production build
+pnpm lint             # tüm workspace'lerde lint çalıştırır
+pnpm test             # tüm workspace'lerde test çalıştırır
+pnpm prisma:generate  # Prisma Client üretir
+pnpm db:migrate       # Migration oluşturur ve uygular (dev)
+pnpm db:seed          # Seed verisini yükler
+pnpm db:reset         # DB'yi sıfırlar ve migration'ları yeniden uygular
 ```
 
 ## Proje Yapısı
