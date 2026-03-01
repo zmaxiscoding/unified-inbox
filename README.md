@@ -56,14 +56,22 @@ pnpm db:reset         # DB'yi sıfırlar ve migration'ları yeniden uygular
 ## API Örnekleri
 
 ```bash
-# Konuşmaları listele
-curl http://localhost:3001/conversations
+# Login (cookie oluşturur)
+curl -i -c cookie.txt -X POST http://localhost:3001/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"agent@acme.com"}'
+
+# Oturum bilgisi
+curl -b cookie.txt http://localhost:3001/auth/session
+
+# Konuşmaları listele (auth gerekli)
+curl -b cookie.txt http://localhost:3001/conversations
 
 # Konuşma mesajlarını listele
-curl http://localhost:3001/conversations/<conversationId>/messages
+curl -b cookie.txt http://localhost:3001/conversations/<conversationId>/messages
 
 # Konuşmaya outbound mesaj ekle
-curl -X POST http://localhost:3001/conversations/<conversationId>/messages \
+curl -b cookie.txt -X POST http://localhost:3001/conversations/<conversationId>/messages \
   -H "Content-Type: application/json" \
   -d '{"text":"Merhaba, siparişiniz bugün kargoya veriliyor."}'
 ```
@@ -75,8 +83,10 @@ cp apps/web/.env.example apps/web/.env
 pnpm dev
 ```
 
+- Login: `http://localhost:3000/login`
 - UI: `http://localhost:3000/inbox`
 - API proxy: web tarafı `/api/*` isteklerini `NEXT_PUBLIC_API_URL` (varsayılan `http://localhost:3001`) adresine yönlendirir.
+- Tek organization üyeliğinde login sonrası otomatik org seçilir; çoklu üyelikte UI org seçimi ister.
 
 ## Proje Yapısı
 

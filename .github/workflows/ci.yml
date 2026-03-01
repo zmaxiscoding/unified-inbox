@@ -38,6 +38,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/unified_inbox?schema=public
       REDIS_URL: redis://localhost:6379
+      SESSION_SECRET: ci-session-secret
 
     steps:
       - uses: actions/checkout@v4

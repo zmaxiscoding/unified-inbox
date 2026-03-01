@@ -2,8 +2,6 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import { MessageDirection } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 
-const SEED_ORG_SLUG = "acme-store";
-
 type MessageWithRelations = {
   id: string;
   direction: MessageDirection;
@@ -13,13 +11,18 @@ type MessageWithRelations = {
   conversation: { contactName: string };
 };
 
+type ConversationListItem = {
+  id: string;
+  contactName: string;
+  lastMessageAt: Date | null;
+  channel: { type: string };
+};
+
 @Injectable()
 export class ConversationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async listConversations() {
-    const organizationId = await this.getSeedOrganizationId();
-
+  async listConversations(organizationId: string) {
     const conversations = await this.prisma.conversation.findMany({
       where: { organizationId },
       orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
@@ -31,7 +34,7 @@ export class ConversationsService {
       },
     });
 
-    return conversations.map((conversation) => ({
+    return conversations.map((conversation: ConversationListItem) => ({
       id: conversation.id,
       customerDisplay: conversation.contactName,
       lastMessageAt: conversation.lastMessageAt,
@@ -39,8 +42,11 @@ export class ConversationsService {
     }));
   }
 
-  async listConversationMessages(conversationId: string) {
-    const conversation = await this.getConversationInSeedOrg(conversationId);
+  async listConversationMessages(organizationId: string, conversationId: string) {
+    const conversation = await this.getConversationInOrganization(
+      organizationId,
+      conversationId,
+    );
     const messages = await this.prisma.message.findMany({
       where: { conversationId: conversation.id },
       orderBy: { createdAt: "asc" },
@@ -54,16 +60,27 @@ export class ConversationsService {
       },
     });
 
-    return messages.map((message) => this.toMessageResponse(message));
+    return messages.map((message: MessageWithRelations) =>
+      this.toMessageResponse(message),
+    );
   }
 
-  async createOutboundMessage(conversationId: string, text: string) {
-    const conversation = await this.getConversationInSeedOrg(conversationId);
+  async createOutboundMessage(
+    organizationId: string,
+    userId: string,
+    conversationId: string,
+    text: string,
+  ) {
+    const conversation = await this.getConversationInOrganization(
+      organizationId,
+      conversationId,
+    );
     const message = await this.prisma.message.create({
       data: {
         conversationId: conversation.id,
         direction: MessageDirection.OUTBOUND,
         body: text,
+        senderId: userId,
       },
       select: {
         id: true,
@@ -87,21 +104,10 @@ export class ConversationsService {
     return this.toMessageResponse(message);
   }
 
-  private async getSeedOrganizationId() {
-    const organization = await this.prisma.organization.findUnique({
-      where: { slug: SEED_ORG_SLUG },
-      select: { id: true },
-    });
-
-    if (!organization) {
-      throw new NotFoundException("Seed organization not found");
-    }
-
-    return organization.id;
-  }
-
-  private async getConversationInSeedOrg(conversationId: string) {
-    const organizationId = await this.getSeedOrganizationId();
+  private async getConversationInOrganization(
+    organizationId: string,
+    conversationId: string,
+  ) {
     const conversation = await this.prisma.conversation.findFirst({
       where: { id: conversationId, organizationId },
       select: { id: true },
