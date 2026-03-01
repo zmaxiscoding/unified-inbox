@@ -260,13 +260,22 @@ export default function TeamSettingsPage() {
               {session.organization.name} • {session.user.name}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => router.push("/inbox")}
-            className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
-          >
-            Inbox
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => router.push("/settings/channels")}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Channels
+            </button>
+            <button
+              type="button"
+              onClick={() => router.push("/inbox")}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Inbox
+            </button>
+          </div>
         </div>
       </header>
 

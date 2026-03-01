@@ -18,10 +18,12 @@ model Organization {
 
   members       Membership[]
   channels      Channel[]
+  channelAccounts ChannelAccount[]
   conversations Conversation[]
   tags          Tag[]
   invitations   Invitation[]
   auditLogs     AuditLog[]
+  rawWebhookEvents RawWebhookEvent[]
 
   @@map("organizations")
 }
@@ -107,6 +109,7 @@ model Conversation {
   contactName          String
   contactPhone         String?
   contactAvatar        String?
+  externalThreadId     String?
   lastMessageAt        DateTime?
   lastMessageText      String?
   isUnread             Boolean            @default(true)
@@ -129,6 +132,7 @@ model Conversation {
   @@index([organizationId, status])
   @@index([organizationId, lastMessageAt(sort: Desc)])
   @@index([assignedMembershipId])
+  @@unique([organizationId, channelId, externalThreadId])
   @@map("conversations")
 }
 
@@ -238,4 +242,53 @@ model AuditLog {
   @@index([organizationId, createdAt(sort: Desc)])
   @@index([organizationId, action])
   @@map("audit_logs")
+}
+
+// ─── Channel Accounts ────────────────────────────────────
+
+model ChannelAccount {
+  id                String      @id @default(cuid())
+  provider          ChannelType
+  externalAccountId String
+  displayPhoneNumber String?
+  wabaId            String?
+  // TODO(encrypt): store access token encrypted at rest.
+  accessToken       String
+  organizationId    String
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider, externalAccountId])
+  @@unique([provider, externalAccountId])
+  @@index([provider, externalAccountId])
+  @@map("channel_accounts")
+}
+
+enum WebhookProcessingStatus {
+  PENDING
+  PROCESSED
+  FAILED
+}
+
+model RawWebhookEvent {
+  id                String                  @id @default(cuid())
+  provider          ChannelType
+  providerMessageId String
+  externalAccountId String
+  payload           Json
+  processingStatus  WebhookProcessingStatus @default(PENDING)
+  processedAt       DateTime?
+  error             String?
+  organizationId    String
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerMessageId])
+  @@index([organizationId, createdAt(sort: Desc)])
+  @@index([provider, externalAccountId, createdAt(sort: Desc)])
+  @@map("raw_webhook_events")
 }

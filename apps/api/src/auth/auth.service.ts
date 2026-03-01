@@ -94,6 +94,7 @@ export class AuthService {
         },
       },
       select: {
+        role: true,
         user: {
           select: {
             id: true,

@@ -5,6 +5,8 @@ import { HealthModule } from "./health/health.module";
 import { ConversationsModule } from "./conversations/conversations.module";
 import { TeamModule } from "./team/team.module";
 import { PrismaModule } from "./prisma/prisma.module";
+import { ChannelsModule } from "./channels/channels.module";
+import { WebhooksModule } from "./webhooks/webhooks.module";
 
 @Module({
   imports: [
@@ -16,6 +18,8 @@ import { PrismaModule } from "./prisma/prisma.module";
     AuthModule,
     ConversationsModule,
     TeamModule,
+    ChannelsModule,
+    WebhooksModule,
   ],
 })
 export class AppModule {}
