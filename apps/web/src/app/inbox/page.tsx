@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 type Conversation = {
   id: string;
@@ -15,6 +16,19 @@ type Message = {
   text: string;
   createdAt: string;
   senderDisplay: string | null;
+};
+
+type SessionInfo = {
+  user: {
+    id: string;
+    name: string;
+    email: string;
+  };
+  organization: {
+    id: string;
+    name: string;
+    slug: string;
+  };
 };
 
 const CHANNEL_LABELS: Record<string, string> = {
@@ -35,13 +49,16 @@ function formatTimestamp(value: string | null) {
 }
 
 export default function InboxPage() {
+  const router = useRouter();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [session, setSession] = useState<SessionInfo | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [isLoadingConversations, setIsLoadingConversations] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const selectedConversation = useMemo(
@@ -49,12 +66,16 @@ export default function InboxPage() {
     [conversations, selectedConversationId],
   );
 
-  const fetchConversations = async () => {
+  const fetchConversations = useCallback(async () => {
     setIsLoadingConversations(true);
     setErrorMessage(null);
 
     try {
       const response = await fetch("/api/conversations", { cache: "no-store" });
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
       if (!response.ok) {
         throw new Error(`Conversations fetch failed: ${response.status}`);
       }
@@ -74,9 +95,30 @@ export default function InboxPage() {
     } finally {
       setIsLoadingConversations(false);
     }
-  };
+  }, [router]);
 
-  const fetchMessages = async (conversationId: string) => {
+  const fetchSession = useCallback(async () => {
+    setIsCheckingSession(true);
+    try {
+      const response = await fetch("/api/auth/session", { cache: "no-store" });
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Session fetch failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as SessionInfo;
+      setSession(data);
+    } catch {
+      setErrorMessage("Oturum doğrulanamadı.");
+    } finally {
+      setIsCheckingSession(false);
+    }
+  }, [router]);
+
+  const fetchMessages = useCallback(async (conversationId: string) => {
     setIsLoadingMessages(true);
     setErrorMessage(null);
 
@@ -84,6 +126,10 @@ export default function InboxPage() {
       const response = await fetch(`/api/conversations/${conversationId}/messages`, {
         cache: "no-store",
       });
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
       if (!response.ok) {
         throw new Error(`Messages fetch failed: ${response.status}`);
       }
@@ -95,16 +141,26 @@ export default function InboxPage() {
     } finally {
       setIsLoadingMessages(false);
     }
+  }, [router]);
+
+  const logout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
   };
 
   useEffect(() => {
+    void fetchSession();
+  }, [fetchSession]);
+
+  useEffect(() => {
+    if (isCheckingSession || !session) return;
     void fetchConversations();
-  }, []);
+  }, [fetchConversations, isCheckingSession, session]);
 
   useEffect(() => {
     if (!selectedConversationId) return;
     void fetchMessages(selectedConversationId);
-  }, [selectedConversationId]);
+  }, [fetchMessages, selectedConversationId]);
 
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -121,6 +177,10 @@ export default function InboxPage() {
         body: JSON.stringify({ text: draft }),
       });
 
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
       if (!response.ok) {
         throw new Error(`Message create failed: ${response.status}`);
       }
@@ -141,7 +201,9 @@ export default function InboxPage() {
         <aside className="h-[42%] w-full border-b border-slate-200 md:h-auto md:w-[360px] md:border-r md:border-b-0">
           <div className="border-b border-slate-200 px-5 py-4">
             <h1 className="text-lg font-semibold text-slate-900">Unified Inbox</h1>
-            <p className="text-sm text-slate-500">Konuşmalar</p>
+            <p className="text-sm text-slate-500">
+              {session ? session.organization.name : "Konuşmalar"}
+            </p>
           </div>
 
           <div className="h-[calc(100%-73px)] overflow-y-auto">
@@ -186,11 +248,25 @@ export default function InboxPage() {
         </aside>
 
         <section className="flex min-h-0 flex-1 flex-col">
-          <header className="border-b border-slate-200 px-6 py-4">
-            <p className="text-sm text-slate-500">Seçili Konuşma</p>
-            <h2 className="text-lg font-semibold text-slate-900">
-              {selectedConversation?.customerDisplay ?? "Konuşma seçin"}
-            </h2>
+          <header className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div>
+              <p className="text-sm text-slate-500">Seçili Konuşma</p>
+              <h2 className="text-lg font-semibold text-slate-900">
+                {selectedConversation?.customerDisplay ?? "Konuşma seçin"}
+              </h2>
+              {session ? (
+                <p className="text-xs text-slate-500">
+                  {session.user.name} ({session.user.email})
+                </p>
+              ) : null}
+            </div>
+            <button
+              type="button"
+              onClick={() => void logout()}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Çıkış
+            </button>
           </header>
 
           {errorMessage ? (
@@ -200,7 +276,9 @@ export default function InboxPage() {
           ) : null}
 
           <div className="flex-1 space-y-3 overflow-y-auto px-6 py-5">
-            {!selectedConversationId ? (
+            {isCheckingSession ? (
+              <p className="text-sm text-slate-500">Oturum kontrol ediliyor...</p>
+            ) : !selectedConversationId ? (
               <p className="text-sm text-slate-500">Mesajları görmek için soldan konuşma seçin.</p>
             ) : isLoadingMessages ? (
               <p className="text-sm text-slate-500">Mesajlar yükleniyor...</p>

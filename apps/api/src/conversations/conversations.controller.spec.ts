@@ -1,5 +1,7 @@
 import { ArgumentMetadata, ValidationPipe } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
+import { SessionPayload } from "../auth/auth.types";
+import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { ConversationsController } from "./conversations.controller";
 import { ConversationsService } from "./conversations.service";
 import { CreateMessageDto } from "./dto/create-message.dto";
@@ -10,6 +12,10 @@ describe("ConversationsController", () => {
     listConversations: jest.Mock;
     listConversationMessages: jest.Mock;
     createOutboundMessage: jest.Mock;
+  };
+  const session: SessionPayload = {
+    userId: "user_1",
+    organizationId: "org_1",
   };
 
   beforeEach(async () => {
@@ -27,7 +33,10 @@ describe("ConversationsController", () => {
           useValue: service,
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(SessionAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<ConversationsController>(ConversationsController);
   });
@@ -46,9 +55,14 @@ describe("ConversationsController", () => {
   it("should create outbound message via service", async () => {
     service.createOutboundMessage.mockResolvedValue({ id: "m1" });
 
-    const result = await controller.createMessage("c1", { text: "hello" });
+    const result = await controller.createMessage("c1", { text: "hello" }, session);
 
     expect(result).toEqual({ id: "m1" });
-    expect(service.createOutboundMessage).toHaveBeenCalledWith("c1", "hello");
+    expect(service.createOutboundMessage).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      "c1",
+      "hello",
+    );
   });
 });
