@@ -216,6 +216,8 @@ model Invitation {
   createdByMembership Membership   @relation(fields: [createdByMembershipId], references: [id], onDelete: Cascade)
 
   @@index([organizationId, email])
+  // Enforced in SQL migration: unique pending invite per (organizationId, email)
+  // where acceptedAt IS NULL and revokedAt IS NULL.
   @@map("invitations")
 }
 

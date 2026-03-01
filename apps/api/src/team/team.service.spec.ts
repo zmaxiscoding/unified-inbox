@@ -16,6 +16,7 @@ describe("TeamService", () => {
       findFirst: jest.Mock;
       findMany: jest.Mock;
       create: jest.Mock;
+      upsert: jest.Mock;
       update: jest.Mock;
       delete: jest.Mock;
       count: jest.Mock;
@@ -26,6 +27,7 @@ describe("TeamService", () => {
       findMany: jest.Mock;
       create: jest.Mock;
       update: jest.Mock;
+      updateMany: jest.Mock;
     };
     user: {
       findUnique: jest.Mock;
@@ -37,6 +39,7 @@ describe("TeamService", () => {
     auditLog: {
       create: jest.Mock;
     };
+    $queryRaw: jest.Mock;
     $transaction: jest.Mock;
   };
   let sessionService: { createSessionCookie: jest.Mock };
@@ -48,6 +51,7 @@ describe("TeamService", () => {
         findFirst: jest.fn(),
         findMany: jest.fn(),
         create: jest.fn(),
+        upsert: jest.fn(),
         update: jest.fn(),
         delete: jest.fn(),
         count: jest.fn(),
@@ -58,6 +62,7 @@ describe("TeamService", () => {
         findMany: jest.fn(),
         create: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
       },
       user: {
         findUnique: jest.fn(),
@@ -69,8 +74,16 @@ describe("TeamService", () => {
       auditLog: {
         create: jest.fn(),
       },
-      $transaction: jest.fn(),
+      $queryRaw: jest.fn(),
+      $transaction: jest.fn(async (arg: unknown) => {
+        if (typeof arg === "function") {
+          return (arg as (tx: unknown) => unknown)(prisma);
+        }
+        return arg;
+      }),
     };
+    prisma.$queryRaw.mockResolvedValue([]);
+    prisma.invitation.updateMany.mockResolvedValue({ count: 1 });
     sessionService = { createSessionCookie: jest.fn() };
 
     service = new TeamService(
@@ -284,8 +297,6 @@ describe("TeamService", () => {
       name: "New User",
       email: "new@acme.com",
     });
-    prisma.membership.findUnique.mockResolvedValue(null);
-    prisma.$transaction.mockResolvedValue([{}, {}]);
     prisma.auditLog.create.mockResolvedValue({});
     sessionService.createSessionCookie.mockReturnValue("ui_session=...");
 
@@ -319,8 +330,6 @@ describe("TeamService", () => {
       name: "Existing User",
       email: "existing@acme.com",
     });
-    prisma.membership.findUnique.mockResolvedValue(null);
-    prisma.$transaction.mockResolvedValue([{}, {}]);
     prisma.auditLog.create.mockResolvedValue({});
     sessionService.createSessionCookie.mockReturnValue("ui_session=...");
 
