@@ -702,6 +702,13 @@ export default function InboxPage() {
               </label>
               <button
                 type="button"
+                onClick={() => router.push("/settings/channels")}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Channels
+              </button>
+              <button
+                type="button"
                 onClick={() => router.push("/settings/team")}
                 className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
               >

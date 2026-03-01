@@ -135,6 +135,69 @@ curl -b cookie.txt -X PATCH http://localhost:3001/memberships/<membershipId>/rol
 
 # Üyeyi kaldır (OWNER yetkisi gerekli)
 curl -b cookie.txt -X DELETE http://localhost:3001/memberships/<membershipId>
+
+# Bağlı kanalları listele (token dönmez)
+curl -b cookie.txt http://localhost:3001/channels
+
+# WhatsApp kanalını bağla
+curl -b cookie.txt -X POST http://localhost:3001/channels/whatsapp/connect \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phoneNumberId":"123456789012345",
+    "accessToken":"EAAG....",
+    "displayPhoneNumber":"+90 555 111 22 33",
+    "wabaId":"1029384756"
+  }'
+
+# WhatsApp webhook (mapped phone_number_id -> 200 OK)
+curl -i -X POST http://localhost:3001/webhooks/whatsapp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entry":[
+      {
+        "changes":[
+          {
+            "value":{
+              "metadata":{"phone_number_id":"123456789012345"},
+              "messages":[
+                {
+                  "id":"wamid.HBgMNTU1MTIzNDU2",
+                  "from":"905551234567",
+                  "type":"text",
+                  "text":{"body":"Merhaba, kargo durumum nedir?"}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }'
+
+# Unmapped phone_number_id -> 400 (queue'ya alınmaz)
+curl -i -X POST http://localhost:3001/webhooks/whatsapp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entry":[
+      {
+        "changes":[
+          {
+            "value":{
+              "metadata":{"phone_number_id":"unmapped-phone-id"},
+              "messages":[
+                {
+                  "id":"wamid.unmapped",
+                  "from":"905551234567",
+                  "type":"text",
+                  "text":{"body":"Test"}
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }'
 ```
 
 ## UI Nasıl Çalıştırılır
@@ -146,8 +209,11 @@ pnpm dev
 
 - Login: `http://localhost:3000/login`
 - UI: `http://localhost:3000/inbox`
+- Channel settings: `http://localhost:3000/settings/channels`
 - API proxy: web tarafı `/api/*` isteklerini `NEXT_PUBLIC_API_URL` (varsayılan `http://localhost:3001`) adresine yönlendirir.
 - Demo simulate inbound kutusunu açmak için `apps/web/.env` içine `NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS=true` ekleyin.
+- API tarafında `/webhooks/whatsapp` için `X-ORG-ID` fallback yalnızca `apps/api/.env` içinde `ENABLE_DEV_ENDPOINTS=true` iken aktiftir.
+- `WEBHOOK_INLINE_WORKER=true` yaparsanız webhook alındığında worker aynı process içinde asenkron normalize eder (MVP kolay test modu).
 - `NEXT_PUBLIC_*` değişkenleri build-time inline edilir; bu flag build sırasında set edilmelidir.
 - Prod build'lerde `NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS` set etmeyin (veya `false` bırakın), UI görünmez.
 - Tek organization üyeliğinde login sonrası otomatik org seçilir; çoklu üyelikte UI org seçimi ister.
