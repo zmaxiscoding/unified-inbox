@@ -7,6 +7,8 @@ import { ConversationsService } from "./conversations.service";
 import { AssignConversationDto } from "./dto/assign-conversation.dto";
 import { CreateMessageDto } from "./dto/create-message.dto";
 
+const VALID_MEMBERSHIP_ID = "11111111-1111-4111-8111-111111111111";
+
 describe("ConversationsController", () => {
   let controller: ConversationsController;
   let service: {
@@ -87,7 +89,7 @@ describe("ConversationsController", () => {
 
     const result = await controller.assignConversation(
       "c1",
-      { membershipId: "mem_1" },
+      { membershipId: VALID_MEMBERSHIP_ID },
       session,
     );
 
@@ -96,7 +98,25 @@ describe("ConversationsController", () => {
       "org_1",
       "user_1",
       "c1",
-      "mem_1",
+      VALID_MEMBERSHIP_ID,
+    );
+  });
+
+  it("should allow null membershipId for unassign path", async () => {
+    service.assignConversation.mockResolvedValue({ id: "c1", assignedMembership: null });
+
+    const result = await controller.assignConversation(
+      "c1",
+      { membershipId: null },
+      session,
+    );
+
+    expect(result).toEqual({ id: "c1", assignedMembership: null });
+    expect(service.assignConversation).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      "c1",
+      null,
     );
   });
 
@@ -115,6 +135,23 @@ describe("ConversationsController", () => {
     await expect(pipe.transform({}, metadata)).rejects.toThrow();
   });
 
+  it("should allow assign payload when membershipId is null", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: AssignConversationDto,
+      data: "",
+    };
+
+    await expect(pipe.transform({ membershipId: null }, metadata)).resolves.toEqual({
+      membershipId: null,
+    });
+  });
+
   it("should reject assign payload when unknown field exists", async () => {
     const pipe = new ValidationPipe({
       whitelist: true,
@@ -129,7 +166,27 @@ describe("ConversationsController", () => {
 
     await expect(
       pipe.transform(
-        { membershipId: "mem_1", extra: "nope" },
+        { membershipId: VALID_MEMBERSHIP_ID, extra: "nope" },
+        metadata,
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("should reject assign payload when membershipId is not uuid", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: AssignConversationDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform(
+        { membershipId: "not-a-uuid" },
         metadata,
       ),
     ).rejects.toThrow();

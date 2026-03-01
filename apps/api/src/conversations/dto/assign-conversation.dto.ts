@@ -1,8 +1,7 @@
-import { IsDefined, IsString, ValidateIf } from "class-validator";
+import { IsUUID, ValidateIf } from "class-validator";
 
 export class AssignConversationDto {
-  @IsDefined()
   @ValidateIf((_object, value) => value !== null)
-  @IsString()
+  @IsUUID()
   membershipId!: string | null;
 }
