@@ -68,6 +68,16 @@ curl -X POST http://localhost:3001/conversations/<conversationId>/messages \
   -d '{"text":"Merhaba, siparişiniz bugün kargoya veriliyor."}'
 ```
 
+## UI Nasıl Çalıştırılır
+
+```bash
+cp apps/web/.env.example apps/web/.env
+pnpm dev
+```
+
+- UI: `http://localhost:3000/inbox`
+- API proxy: web tarafı `/api/*` isteklerini `NEXT_PUBLIC_API_URL` (varsayılan `http://localhost:3001`) adresine yönlendirir.
+
 ## Proje Yapısı
 
 ```
