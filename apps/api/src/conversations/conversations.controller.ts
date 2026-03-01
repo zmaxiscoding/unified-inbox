@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   Patch,
   Post,
@@ -12,6 +14,7 @@ import {
 import { Session } from "../auth/session.decorator";
 import { SessionPayload } from "../auth/auth.types";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
+import { AddTagDto } from "./dto/add-tag.dto";
 import { AssignConversationDto } from "./dto/assign-conversation.dto";
 import { CreateMessageDto } from "./dto/create-message.dto";
 import { ConversationsService } from "./conversations.service";
@@ -56,6 +59,51 @@ export class ConversationsController {
       session.userId,
       id,
       body.text,
+    );
+  }
+
+  @Get(":id/tags")
+  getConversationTags(
+    @Param("id") id: string,
+    @Session() session: SessionPayload,
+  ) {
+    return this.conversationsService.listConversationTags(
+      session.organizationId,
+      id,
+    );
+  }
+
+  @Post(":id/tags")
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  )
+  addTag(
+    @Param("id") id: string,
+    @Body() body: AddTagDto,
+    @Session() session: SessionPayload,
+  ) {
+    return this.conversationsService.addTagToConversation(
+      session.organizationId,
+      id,
+      body.name,
+    );
+  }
+
+  @Delete(":id/tags/:tagId")
+  @HttpCode(204)
+  removeTag(
+    @Param("id") id: string,
+    @Param("tagId") tagId: string,
+    @Session() session: SessionPayload,
+  ) {
+    return this.conversationsService.removeTagFromConversation(
+      session.organizationId,
+      id,
+      tagId,
     );
   }
 

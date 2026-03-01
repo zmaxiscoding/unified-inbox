@@ -20,6 +20,15 @@ describe("ConversationsService", () => {
     auditLog: {
       create: jest.Mock;
     };
+    tag: {
+      upsert: jest.Mock;
+    };
+    conversationTag: {
+      findMany: jest.Mock;
+      findUnique: jest.Mock;
+      upsert: jest.Mock;
+      delete: jest.Mock;
+    };
   };
 
   beforeEach(() => {
@@ -35,6 +44,15 @@ describe("ConversationsService", () => {
       },
       auditLog: {
         create: jest.fn(),
+      },
+      tag: {
+        upsert: jest.fn(),
+      },
+      conversationTag: {
+        findMany: jest.fn(),
+        findUnique: jest.fn(),
+        upsert: jest.fn(),
+        delete: jest.fn(),
       },
     };
 
@@ -171,6 +189,7 @@ describe("ConversationsService", () => {
             email: "agent@acme.com",
           },
         },
+        tags: [],
       },
       {
         id: "conv_2",
@@ -178,6 +197,7 @@ describe("ConversationsService", () => {
         lastMessageAt: null,
         channel: { type: "INSTAGRAM" },
         assignedMembership: null,
+        tags: [],
       },
     ]);
 
@@ -209,6 +229,100 @@ describe("ConversationsService", () => {
     expect(result).toEqual([
       { membershipId: "mem_1", name: "Ali Yılmaz", role: "OWNER" },
       { membershipId: "mem_2", name: "Zeynep Demir", role: "AGENT" },
+    ]);
+  });
+
+  // ── Tag service tests ───────────────────────────────────
+
+  it("should list conversation tags", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.conversationTag.findMany.mockResolvedValue([
+      { tag: { id: "t1", name: "vip" } },
+      { tag: { id: "t2", name: "iade" } },
+    ]);
+
+    const result = await service.listConversationTags("org_1", "conv_1");
+
+    expect(result).toEqual([
+      { id: "t1", name: "vip" },
+      { id: "t2", name: "iade" },
+    ]);
+  });
+
+  it("should add tag: create-or-reuse tag + attach to conversation", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.tag.upsert.mockResolvedValue({ id: "t1", name: "vip" });
+    prisma.conversationTag.upsert.mockResolvedValue({});
+
+    const result = await service.addTagToConversation("org_1", "conv_1", " VIP ");
+
+    expect(result).toEqual({ id: "t1", name: "vip" });
+    expect(prisma.tag.upsert).toHaveBeenCalledWith({
+      where: { organizationId_name: { organizationId: "org_1", name: "vip" } },
+      update: {},
+      create: { name: "vip", organizationId: "org_1" },
+    });
+    expect(prisma.conversationTag.upsert).toHaveBeenCalledWith({
+      where: { conversationId_tagId: { conversationId: "conv_1", tagId: "t1" } },
+      update: {},
+      create: { conversationId: "conv_1", tagId: "t1" },
+    });
+  });
+
+  it("should return 404 when adding tag to cross-tenant conversation", async () => {
+    prisma.conversation.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.addTagToConversation("org_other", "conv_1", "vip"),
+    ).rejects.toEqual(new NotFoundException("Conversation not found"));
+  });
+
+  it("should remove tag from conversation", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.conversationTag.findUnique.mockResolvedValue({
+      conversationId: "conv_1",
+      tagId: "t1",
+    });
+    prisma.conversationTag.delete.mockResolvedValue({});
+
+    await service.removeTagFromConversation("org_1", "conv_1", "t1");
+
+    expect(prisma.conversationTag.delete).toHaveBeenCalledWith({
+      where: { conversationId_tagId: { conversationId: "conv_1", tagId: "t1" } },
+    });
+  });
+
+  it("should return 404 when removing tag that is not on conversation", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.conversationTag.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.removeTagFromConversation("org_1", "conv_1", "t_nonexistent"),
+    ).rejects.toEqual(
+      new NotFoundException("Tag not found on this conversation"),
+    );
+  });
+
+  it("should include tags in conversations list", async () => {
+    prisma.conversation.findMany.mockResolvedValue([
+      {
+        id: "conv_1",
+        contactName: "Ahmet Kaya",
+        lastMessageAt: new Date("2026-03-01T10:00:00.000Z"),
+        channel: { type: "WHATSAPP" },
+        assignedMembership: null,
+        tags: [
+          { tag: { id: "t1", name: "vip" } },
+          { tag: { id: "t2", name: "iade" } },
+        ],
+      },
+    ]);
+
+    const result = await service.listConversations("org_1");
+
+    expect(result[0].tags).toEqual([
+      { id: "t1", name: "vip" },
+      { id: "t2", name: "iade" },
     ]);
   });
 });

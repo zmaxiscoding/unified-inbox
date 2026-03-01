@@ -87,6 +87,17 @@ curl -b cookie.txt -X PATCH http://localhost:3001/conversations/<conversationId>
 curl -b cookie.txt -X PATCH http://localhost:3001/conversations/<conversationId>/assign \
   -H "Content-Type: application/json" \
   -d '{"membershipId":null}'
+
+# Konuşma etiketlerini listele
+curl -b cookie.txt http://localhost:3001/conversations/<conversationId>/tags
+
+# Konuşmaya etiket ekle (yoksa oluşturur, varsa reuse eder)
+curl -b cookie.txt -X POST http://localhost:3001/conversations/<conversationId>/tags \
+  -H "Content-Type: application/json" \
+  -d '{"name":"VIP"}'
+
+# Konuşmadan etiket kaldır
+curl -b cookie.txt -X DELETE http://localhost:3001/conversations/<conversationId>/tags/<tagId>
 ```
 
 ## UI Nasıl Çalıştırılır
