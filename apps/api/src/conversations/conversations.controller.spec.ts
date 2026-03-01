@@ -4,14 +4,19 @@ import { SessionPayload } from "../auth/auth.types";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { ConversationsController } from "./conversations.controller";
 import { ConversationsService } from "./conversations.service";
+import { AssignConversationDto } from "./dto/assign-conversation.dto";
 import { CreateMessageDto } from "./dto/create-message.dto";
+
+const VALID_CUID_MEMBERSHIP_ID = "cjfne4n3f0000qzrmn831i7rn";
 
 describe("ConversationsController", () => {
   let controller: ConversationsController;
   let service: {
     listConversations: jest.Mock;
+    listOrganizationMembers: jest.Mock;
     listConversationMessages: jest.Mock;
     createOutboundMessage: jest.Mock;
+    assignConversation: jest.Mock;
   };
   const session: SessionPayload = {
     userId: "user_1",
@@ -23,8 +28,10 @@ describe("ConversationsController", () => {
   beforeEach(async () => {
     service = {
       listConversations: jest.fn(),
+      listOrganizationMembers: jest.fn(),
       listConversationMessages: jest.fn(),
       createOutboundMessage: jest.fn(),
+      assignConversation: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -66,5 +73,142 @@ describe("ConversationsController", () => {
       "c1",
       "hello",
     );
+  });
+
+  it("should list members via service", async () => {
+    service.listOrganizationMembers.mockResolvedValue([{ membershipId: "m1" }]);
+
+    const result = await controller.getOrganizationMembers(session);
+
+    expect(result).toEqual([{ membershipId: "m1" }]);
+    expect(service.listOrganizationMembers).toHaveBeenCalledWith("org_1");
+  });
+
+  it("should assign conversation via service", async () => {
+    service.assignConversation.mockResolvedValue({ id: "c1" });
+
+    const result = await controller.assignConversation(
+      "c1",
+      { membershipId: VALID_CUID_MEMBERSHIP_ID },
+      session,
+    );
+
+    expect(result).toEqual({ id: "c1" });
+    expect(service.assignConversation).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      "c1",
+      VALID_CUID_MEMBERSHIP_ID,
+    );
+  });
+
+  it("should allow null membershipId for unassign path", async () => {
+    service.assignConversation.mockResolvedValue({ id: "c1", assignedMembership: null });
+
+    const result = await controller.assignConversation(
+      "c1",
+      { membershipId: null },
+      session,
+    );
+
+    expect(result).toEqual({ id: "c1", assignedMembership: null });
+    expect(service.assignConversation).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      "c1",
+      null,
+    );
+  });
+
+  it("should reject assign payload when membershipId is missing", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: AssignConversationDto,
+      data: "",
+    };
+
+    await expect(pipe.transform({}, metadata)).rejects.toThrow();
+  });
+
+  it("should allow assign payload when membershipId is null", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: AssignConversationDto,
+      data: "",
+    };
+
+    await expect(pipe.transform({ membershipId: null }, metadata)).resolves.toEqual({
+      membershipId: null,
+    });
+  });
+
+  it("should reject assign payload when unknown field exists", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: AssignConversationDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform(
+        { membershipId: VALID_CUID_MEMBERSHIP_ID, extra: "nope" },
+        metadata,
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("should allow assign payload when membershipId is a CUID", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: AssignConversationDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform(
+        { membershipId: VALID_CUID_MEMBERSHIP_ID },
+        metadata,
+      ),
+    ).resolves.toEqual({ membershipId: VALID_CUID_MEMBERSHIP_ID });
+  });
+
+  it("should reject assign payload when membershipId is not a CUID", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: AssignConversationDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform(
+        { membershipId: "not-a-cuid" },
+        metadata,
+      ),
+    ).rejects.toThrow();
   });
 });
