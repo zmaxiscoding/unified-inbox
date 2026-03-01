@@ -273,11 +273,12 @@ describe("TeamService", () => {
 
     await expect(
       service.acceptInvite("a".repeat(64)),
-    ).rejects.toEqual(
-      new BadRequestException(
-        "name and password are required for new users",
-      ),
-    );
+    ).rejects.toMatchObject({
+      response: {
+        message: "name and password are required for new users",
+        code: "INVITE_NEW_USER_REQUIRED",
+      },
+    });
   });
 
   it("should create new user and membership on accept", async () => {

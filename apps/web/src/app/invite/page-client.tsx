@@ -3,13 +3,20 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const NEW_USER_MESSAGE = "name and password are required for new users";
+const NEW_USER_REQUIRED_CODE = "INVITE_NEW_USER_REQUIRED";
 
-const getErrorMessage = async (response: Response, fallback: string) => {
+const getErrorBody = async (response: Response) => {
   const body = (await response.json().catch(() => null)) as
-    | { message?: string | string[] }
+    | { message?: string | string[]; code?: string }
     | null;
 
+  return body;
+};
+
+const getErrorMessage = (
+  body: { message?: string | string[] } | null,
+  fallback: string,
+) => {
   if (!body?.message) return fallback;
   if (Array.isArray(body.message)) {
     return body.message.join(", ");
@@ -72,8 +79,9 @@ export default function InvitePageClient({ token }: { token: string }) {
         return;
       }
 
-      const message = await getErrorMessage(response, "Invite kabul edilemedi.");
-      if (message === NEW_USER_MESSAGE) {
+      const body = await getErrorBody(response);
+      const message = getErrorMessage(body, "Invite kabul edilemedi.");
+      if (body?.code === NEW_USER_REQUIRED_CODE) {
         setMode("register");
         setInfo("Yeni kullanıcı için isim ve şifre belirleyin.");
         return;
@@ -107,7 +115,8 @@ export default function InvitePageClient({ token }: { token: string }) {
       });
 
       if (!response.ok) {
-        throw new Error(await getErrorMessage(response, "Invite kabul edilemedi."));
+        const body = await getErrorBody(response);
+        throw new Error(getErrorMessage(body, "Invite kabul edilemedi."));
       }
 
       await response.json().catch(() => null);

@@ -15,6 +15,9 @@ import { SESSION_TTL_SECONDS } from "../auth/session.constants";
 const INVITE_EXPIRY_DAYS = 7;
 const BCRYPT_ROUNDS = 12;
 const INVITE_EXISTS_MESSAGE = "A pending invitation already exists for this email";
+const INVITE_NEW_USER_REQUIRED_CODE = "INVITE_NEW_USER_REQUIRED";
+const INVITE_NEW_USER_REQUIRED_MESSAGE =
+  "name and password are required for new users";
 
 type TeamDbClient = PrismaService | Prisma.TransactionClient;
 
@@ -218,9 +221,10 @@ export class TeamService {
 
       if (!user) {
         if (!name || !password) {
-          throw new BadRequestException(
-            "name and password are required for new users",
-          );
+          throw new BadRequestException({
+            message: INVITE_NEW_USER_REQUIRED_MESSAGE,
+            code: INVITE_NEW_USER_REQUIRED_CODE,
+          });
         }
 
         const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
