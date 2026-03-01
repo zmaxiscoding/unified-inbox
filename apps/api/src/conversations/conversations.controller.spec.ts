@@ -7,7 +7,7 @@ import { ConversationsService } from "./conversations.service";
 import { AssignConversationDto } from "./dto/assign-conversation.dto";
 import { CreateMessageDto } from "./dto/create-message.dto";
 
-const VALID_MEMBERSHIP_ID = "11111111-1111-4111-8111-111111111111";
+const VALID_CUID_MEMBERSHIP_ID = "cjfne4n3f0000qzrmn831i7rn";
 
 describe("ConversationsController", () => {
   let controller: ConversationsController;
@@ -89,7 +89,7 @@ describe("ConversationsController", () => {
 
     const result = await controller.assignConversation(
       "c1",
-      { membershipId: VALID_MEMBERSHIP_ID },
+      { membershipId: VALID_CUID_MEMBERSHIP_ID },
       session,
     );
 
@@ -98,7 +98,7 @@ describe("ConversationsController", () => {
       "org_1",
       "user_1",
       "c1",
-      VALID_MEMBERSHIP_ID,
+      VALID_CUID_MEMBERSHIP_ID,
     );
   });
 
@@ -166,13 +166,13 @@ describe("ConversationsController", () => {
 
     await expect(
       pipe.transform(
-        { membershipId: VALID_MEMBERSHIP_ID, extra: "nope" },
+        { membershipId: VALID_CUID_MEMBERSHIP_ID, extra: "nope" },
         metadata,
       ),
     ).rejects.toThrow();
   });
 
-  it("should reject assign payload when membershipId is not uuid", async () => {
+  it("should allow assign payload when membershipId is a CUID", async () => {
     const pipe = new ValidationPipe({
       whitelist: true,
       forbidNonWhitelisted: true,
@@ -186,7 +186,27 @@ describe("ConversationsController", () => {
 
     await expect(
       pipe.transform(
-        { membershipId: "not-a-uuid" },
+        { membershipId: VALID_CUID_MEMBERSHIP_ID },
+        metadata,
+      ),
+    ).resolves.toEqual({ membershipId: VALID_CUID_MEMBERSHIP_ID });
+  });
+
+  it("should reject assign payload when membershipId is not a CUID", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: AssignConversationDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform(
+        { membershipId: "not-a-cuid" },
         metadata,
       ),
     ).rejects.toThrow();
