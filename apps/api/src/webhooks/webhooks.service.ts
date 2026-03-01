@@ -1,9 +1,10 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { ChannelType, Prisma } from "@prisma/client";
+import { createHash } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import {
   extractWhatsAppPhoneNumberId,
-  extractWhatsAppTextMessage,
+  extractWhatsAppProviderMessageId,
 } from "./whatsapp-payload";
 import { WebhooksQueueService } from "./webhooks.queue.service";
 
@@ -20,12 +21,9 @@ export class WebhooksService {
       throw new BadRequestException("phone_number_id is missing in payload");
     }
 
-    const normalizedMessage = extractWhatsAppTextMessage(payload);
-    if (!normalizedMessage) {
-      throw new BadRequestException(
-        "Only WhatsApp text messages are supported in MVP",
-      );
-    }
+    const providerMessageId =
+      extractWhatsAppProviderMessageId(payload) ??
+      this.createFallbackProviderMessageId(payload);
 
     const organizationId = await this.resolveOrganizationId(
       phoneNumberId,
@@ -36,7 +34,7 @@ export class WebhooksService {
       const rawWebhookEvent = await this.prisma.rawWebhookEvent.create({
         data: {
           provider: ChannelType.WHATSAPP,
-          providerMessageId: normalizedMessage.providerMessageId,
+          providerMessageId,
           externalAccountId: phoneNumberId,
           organizationId,
           payload: payload as Prisma.InputJsonValue,
@@ -94,5 +92,11 @@ export class WebhooksService {
     }
 
     return (error as { code?: string }).code === "P2002";
+  }
+
+  private createFallbackProviderMessageId(payload: unknown) {
+    const payloadString = JSON.stringify(payload) ?? "undefined";
+    const hash = createHash("sha256").update(payloadString).digest("hex");
+    return `payload:${hash}`;
   }
 }

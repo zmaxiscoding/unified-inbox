@@ -213,7 +213,8 @@ pnpm dev
 - API proxy: web tarafı `/api/*` isteklerini `NEXT_PUBLIC_API_URL` (varsayılan `http://localhost:3001`) adresine yönlendirir.
 - Demo simulate inbound kutusunu açmak için `apps/web/.env` içine `NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS=true` ekleyin.
 - API tarafında `/webhooks/whatsapp` için `X-ORG-ID` fallback yalnızca `apps/api/.env` içinde `ENABLE_DEV_ENDPOINTS=true` iken aktiftir.
-- `WEBHOOK_INLINE_WORKER=true` yaparsanız webhook alındığında worker aynı process içinde asenkron normalize eder (MVP kolay test modu).
+- Webhook event'leri varsayılan olarak işlenir; Redis erişimi yoksa inline fallback ve pending-event poller devreye girer.
+- İsteğe bağlı polling aralığı için `apps/api/.env` içinde `WEBHOOK_POLL_INTERVAL_MS` ayarlanabilir (varsayılan: `3000`).
 - `NEXT_PUBLIC_*` değişkenleri build-time inline edilir; bu flag build sırasında set edilmelidir.
 - Prod build'lerde `NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS` set etmeyin (veya `false` bırakın), UI görünmez.
 - Tek organization üyeliğinde login sonrası otomatik org seçilir; çoklu üyelikte UI org seçimi ister.

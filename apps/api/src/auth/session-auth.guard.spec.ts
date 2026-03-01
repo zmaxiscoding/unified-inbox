@@ -92,6 +92,7 @@ describe("SessionAuthGuard", () => {
 
     sessionService.parseCookie.mockReturnValue(parsedSession);
     authService.getSessionDetails.mockResolvedValue({
+      role: "OWNER",
       user: { id: "u1" },
       organization: { id: "org_1" },
     });
@@ -104,7 +105,10 @@ describe("SessionAuthGuard", () => {
     } as ExecutionContext;
 
     await expect(guard.canActivate(context)).resolves.toBe(true);
-    expect(request.session).toEqual(parsedSession);
+    expect(request.session).toEqual({
+      ...parsedSession,
+      role: "OWNER",
+    });
     expect(authService.getSessionDetails).toHaveBeenCalledWith(parsedSession);
   });
 });

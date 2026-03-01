@@ -36,7 +36,15 @@ export class WebhooksWorkerService {
 
       const normalizedMessage = extractWhatsAppTextMessage(rawEvent.payload);
       if (!normalizedMessage) {
-        throw new Error("Only WhatsApp text messages are supported in MVP");
+        await this.prisma.rawWebhookEvent.update({
+          where: { id: rawEvent.id },
+          data: {
+            processingStatus: WebhookProcessingStatus.PROCESSED,
+            processedAt: new Date(),
+            error: null,
+          },
+        });
+        return;
       }
 
       await this.prisma.$transaction(async (tx) => {

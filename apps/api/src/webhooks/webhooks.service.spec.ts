@@ -29,6 +29,28 @@ const WHATSAPP_TEXT_PAYLOAD = {
   ],
 };
 
+const WHATSAPP_STATUS_PAYLOAD = {
+  entry: [
+    {
+      changes: [
+        {
+          value: {
+            metadata: {
+              phone_number_id: "12345",
+            },
+            statuses: [
+              {
+                id: "wamid.status001",
+                status: "delivered",
+              },
+            ],
+          },
+        },
+      ],
+    },
+  ],
+};
+
 describe("WebhooksService", () => {
   let service: WebhooksService;
   let prisma: {
@@ -130,5 +152,24 @@ describe("WebhooksService", () => {
 
     expect(result).toEqual({ ok: true, duplicate: true });
     expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("should accept mapped non-text updates and enqueue", async () => {
+    prisma.channelAccount.findFirst.mockResolvedValue({ organizationId: "org_1" });
+    prisma.rawWebhookEvent.create.mockResolvedValue({ id: "rwe_3" });
+
+    const result = await service.handleWhatsAppWebhook(WHATSAPP_STATUS_PAYLOAD);
+
+    expect(result).toEqual({ ok: true });
+    expect(prisma.rawWebhookEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          providerMessageId: "wamid.status001",
+          externalAccountId: "12345",
+          organizationId: "org_1",
+        }),
+      }),
+    );
+    expect(queue.enqueue).toHaveBeenCalledWith("rwe_3");
   });
 });

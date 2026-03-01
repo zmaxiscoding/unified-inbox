@@ -252,6 +252,7 @@ model ChannelAccount {
   externalAccountId String
   displayPhoneNumber String?
   wabaId            String?
+  // TODO(encrypt): store access token encrypted at rest.
   accessToken       String
   organizationId    String
   createdAt         DateTime    @default(now())

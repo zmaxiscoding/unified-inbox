@@ -65,6 +65,7 @@ export class ChannelsService {
             organizationId,
             provider: ChannelType.WHATSAPP,
             externalAccountId: phoneNumberId,
+            // TODO(encrypt): persist encrypted token instead of plaintext.
             accessToken,
             displayPhoneNumber,
             wabaId,

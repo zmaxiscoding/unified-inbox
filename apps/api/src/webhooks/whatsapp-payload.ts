@@ -105,3 +105,35 @@ export function extractWhatsAppTextMessage(
 
   return null;
 }
+
+export function extractWhatsAppProviderMessageId(payload: unknown): string | null {
+  const values = getChangeValues(payload);
+
+  for (const value of values) {
+    const messages = Array.isArray(value.messages) ? value.messages : [];
+    for (const message of messages) {
+      if (!isPlainObject(message)) {
+        continue;
+      }
+
+      const providerMessageId = readNonEmptyString(message.id);
+      if (providerMessageId) {
+        return providerMessageId;
+      }
+    }
+
+    const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+    for (const status of statuses) {
+      if (!isPlainObject(status)) {
+        continue;
+      }
+
+      const providerMessageId = readNonEmptyString(status.id);
+      if (providerMessageId) {
+        return providerMessageId;
+      }
+    }
+  }
+
+  return null;
+}

@@ -29,7 +29,8 @@ export class SessionAuthGuard implements CanActivate {
     }
 
     try {
-      await this.authService.getSessionDetails(session);
+      const details = await this.authService.getSessionDetails(session);
+      request.session = { ...session, role: details.role };
     } catch (error) {
       if (error instanceof UnauthorizedException) {
         response.setHeader("Set-Cookie", this.sessionService.clearSessionCookie());
@@ -38,8 +39,6 @@ export class SessionAuthGuard implements CanActivate {
 
       throw error;
     }
-
-    request.session = session;
     return true;
   }
 }

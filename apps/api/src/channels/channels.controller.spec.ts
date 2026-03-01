@@ -16,6 +16,7 @@ describe("ChannelsController", () => {
   const session: SessionPayload = {
     userId: "user_1",
     organizationId: "org_1",
+    role: "OWNER",
     iat: 1,
     exp: 2,
   };
@@ -64,6 +65,22 @@ describe("ChannelsController", () => {
       "user_1",
       payload,
     );
+  });
+
+  it("should reject whatsapp connect for AGENT role", async () => {
+    const payload: ConnectWhatsAppChannelDto = {
+      phoneNumberId: "12345",
+      accessToken: "token",
+    };
+
+    expect(() =>
+      controller.connectWhatsAppChannel(payload, {
+        ...session,
+        role: "AGENT",
+      }),
+    ).toThrow("Only owners can connect channels");
+
+    expect(service.connectWhatsAppChannel).not.toHaveBeenCalled();
   });
 
   it("should reject blank phoneNumberId payload", async () => {
