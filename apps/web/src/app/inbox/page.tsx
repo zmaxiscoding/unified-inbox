@@ -3,11 +3,21 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+type AssignedMembership = {
+  id: string;
+  user: {
+    id: string;
+    name: string;
+    email?: string;
+  };
+};
+
 type Conversation = {
   id: string;
   customerDisplay: string;
   lastMessageAt: string | null;
   channelProvider: "WHATSAPP" | "INSTAGRAM" | string;
+  assignedMembership: AssignedMembership | null;
 };
 
 type Message = {
@@ -31,10 +41,23 @@ type SessionInfo = {
   };
 };
 
+type OrganizationMember = {
+  membershipId: string;
+  name: string;
+  role: "OWNER" | "AGENT" | string;
+};
+
+type AssignConversationResponse = {
+  id: string;
+  assignedMembership: AssignedMembership | null;
+};
+
 const CHANNEL_LABELS: Record<string, string> = {
   WHATSAPP: "WhatsApp",
   INSTAGRAM: "Instagram",
 };
+
+const UNASSIGNED_VALUE = "__UNASSIGNED__";
 
 function formatTimestamp(value: string | null) {
   if (!value) return "-";
@@ -48,15 +71,29 @@ function formatTimestamp(value: string | null) {
   }).format(parsed);
 }
 
+function toInitials(value: string) {
+  const parts = value
+    .split(" ")
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .slice(0, 2);
+  if (parts.length === 0) return "?";
+
+  return parts.map((part) => part[0]?.toUpperCase() ?? "").join("");
+}
+
 export default function InboxPage() {
   const router = useRouter();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [members, setMembers] = useState<OrganizationMember[]>([]);
   const [session, setSession] = useState<SessionInfo | null>(null);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [isLoadingConversations, setIsLoadingConversations] = useState(true);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [isLoadingMembers, setIsLoadingMembers] = useState(false);
+  const [isAssigning, setIsAssigning] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -64,6 +101,17 @@ export default function InboxPage() {
   const selectedConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
     [conversations, selectedConversationId],
+  );
+
+  const applyConversationAssignment = useCallback(
+    (conversationId: string, assignedMembership: AssignedMembership | null) => {
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === conversationId ? { ...conversation, assignedMembership } : conversation,
+        ),
+      );
+    },
+    [],
   );
 
   const fetchConversations = useCallback(async () => {
@@ -89,11 +137,36 @@ export default function InboxPage() {
         return;
       }
 
-      setSelectedConversationId((current) => current ?? data[0].id);
+      setSelectedConversationId((current) =>
+        current && data.some((conversation) => conversation.id === current) ? current : data[0].id,
+      );
     } catch {
       setErrorMessage("API'ye ulaşılamıyor. Backend ayakta mı kontrol edin.");
     } finally {
       setIsLoadingConversations(false);
+    }
+  }, [router]);
+
+  const fetchMembers = useCallback(async () => {
+    setIsLoadingMembers(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch("/api/conversations/members", { cache: "no-store" });
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Members fetch failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as OrganizationMember[];
+      setMembers(data);
+    } catch {
+      setErrorMessage("Atama listesi alınamadı.");
+    } finally {
+      setIsLoadingMembers(false);
     }
   }, [router]);
 
@@ -154,8 +227,8 @@ export default function InboxPage() {
 
   useEffect(() => {
     if (isCheckingSession || !session) return;
-    void fetchConversations();
-  }, [fetchConversations, isCheckingSession, session]);
+    void Promise.all([fetchConversations(), fetchMembers()]);
+  }, [fetchConversations, fetchMembers, isCheckingSession, session]);
 
   useEffect(() => {
     if (!selectedConversationId) return;
@@ -195,6 +268,61 @@ export default function InboxPage() {
     }
   };
 
+  const handleAssign = async (nextMembershipId: string | null) => {
+    if (!selectedConversationId || !selectedConversation || isAssigning) {
+      return;
+    }
+
+    const currentMembershipId = selectedConversation.assignedMembership?.id ?? null;
+    if (currentMembershipId === nextMembershipId) {
+      return;
+    }
+
+    const previousAssignment = selectedConversation.assignedMembership;
+    const selectedMember =
+      nextMembershipId === null
+        ? null
+        : members.find((member) => member.membershipId === nextMembershipId) ?? null;
+    const optimisticAssignment: AssignedMembership | null =
+      nextMembershipId === null
+        ? null
+        : {
+            id: nextMembershipId,
+            user: {
+              id: previousAssignment?.user.id ?? `pending-${nextMembershipId}`,
+              name: selectedMember?.name ?? previousAssignment?.user.name ?? "Atandı",
+            },
+          };
+
+    setIsAssigning(true);
+    setErrorMessage(null);
+    applyConversationAssignment(selectedConversationId, optimisticAssignment);
+
+    try {
+      const response = await fetch(`/api/conversations/${selectedConversationId}/assign`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ membershipId: nextMembershipId }),
+      });
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Assign failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as AssignConversationResponse;
+      applyConversationAssignment(data.id, data.assignedMembership);
+    } catch {
+      applyConversationAssignment(selectedConversationId, previousAssignment);
+      setErrorMessage("Konuşma ataması güncellenemedi.");
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-slate-100 p-4 md:p-6">
       <div className="mx-auto flex h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:h-[calc(100vh-3rem)] md:flex-row">
@@ -225,13 +353,23 @@ export default function InboxPage() {
                   >
                     <div className="flex items-center justify-between gap-3">
                       <p className="truncate text-sm font-medium">{conversation.customerDisplay}</p>
-                      <span
-                        className={`shrink-0 text-xs ${
-                          selected ? "text-slate-200" : "text-slate-400"
-                        }`}
-                      >
-                        {formatTimestamp(conversation.lastMessageAt)}
-                      </span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        {conversation.assignedMembership ? (
+                          <span
+                            title={conversation.assignedMembership.user.name}
+                            className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-semibold ${
+                              selected ? "bg-slate-700 text-slate-100" : "bg-slate-200 text-slate-700"
+                            }`}
+                          >
+                            {toInitials(conversation.assignedMembership.user.name)}
+                          </span>
+                        ) : null}
+                        <span
+                          className={`text-xs ${selected ? "text-slate-200" : "text-slate-400"}`}
+                        >
+                          {formatTimestamp(conversation.lastMessageAt)}
+                        </span>
+                      </div>
                     </div>
                     <p
                       className={`mt-1 text-xs ${
@@ -260,13 +398,34 @@ export default function InboxPage() {
                 </p>
               ) : null}
             </div>
-            <button
-              type="button"
-              onClick={() => void logout()}
-              className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
-            >
-              Çıkış
-            </button>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                Atama
+                <select
+                  value={selectedConversation?.assignedMembership?.id ?? UNASSIGNED_VALUE}
+                  disabled={!selectedConversationId || isLoadingMembers || isAssigning}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    void handleAssign(value === UNASSIGNED_VALUE ? null : value);
+                  }}
+                  className="h-9 min-w-[180px] rounded-lg border border-slate-300 bg-white px-2 text-sm text-slate-800 outline-none focus:border-slate-500 disabled:cursor-not-allowed disabled:bg-slate-100"
+                >
+                  <option value={UNASSIGNED_VALUE}>Atanmamış</option>
+                  {members.map((member) => (
+                    <option key={member.membershipId} value={member.membershipId}>
+                      {member.name} ({member.role})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => void logout()}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+              >
+                Çıkış
+              </button>
+            </div>
           </header>
 
           {errorMessage ? (

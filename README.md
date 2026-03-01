@@ -67,6 +67,9 @@ curl -b cookie.txt http://localhost:3001/auth/session
 # Konuşmaları listele (auth gerekli)
 curl -b cookie.txt http://localhost:3001/conversations
 
+# Assign dropdown için organization member listesi
+curl -b cookie.txt http://localhost:3001/conversations/members
+
 # Konuşma mesajlarını listele
 curl -b cookie.txt http://localhost:3001/conversations/<conversationId>/messages
 
@@ -74,6 +77,16 @@ curl -b cookie.txt http://localhost:3001/conversations/<conversationId>/messages
 curl -b cookie.txt -X POST http://localhost:3001/conversations/<conversationId>/messages \
   -H "Content-Type: application/json" \
   -d '{"text":"Merhaba, siparişiniz bugün kargoya veriliyor."}'
+
+# Konuşmayı bir member'a ata
+curl -b cookie.txt -X PATCH http://localhost:3001/conversations/<conversationId>/assign \
+  -H "Content-Type: application/json" \
+  -d '{"membershipId":"<membershipId>"}'
+
+# Konuşma atamasını kaldır
+curl -b cookie.txt -X PATCH http://localhost:3001/conversations/<conversationId>/assign \
+  -H "Content-Type: application/json" \
+  -d '{"membershipId":null}'
 ```
 
 ## UI Nasıl Çalıştırılır
@@ -87,6 +100,7 @@ pnpm dev
 - UI: `http://localhost:3000/inbox`
 - API proxy: web tarafı `/api/*` isteklerini `NEXT_PUBLIC_API_URL` (varsayılan `http://localhost:3001`) adresine yönlendirir.
 - Tek organization üyeliğinde login sonrası otomatik org seçilir; çoklu üyelikte UI org seçimi ister.
+- Inbox sağ panel header'ında assign dropdown ile konuşma atama/atama kaldırma yapılır.
 
 ## Proje Yapısı
 
