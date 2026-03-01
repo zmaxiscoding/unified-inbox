@@ -536,6 +536,7 @@ export class TeamService {
       SELECT "id"
       FROM "memberships"
       WHERE "organizationId" = ${organizationId}
+      ORDER BY "id"
       FOR UPDATE
     `;
   }
