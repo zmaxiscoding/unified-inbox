@@ -6,8 +6,16 @@ export const SESSION_COOKIE_NAME = "ui_session";
 
 @Injectable()
 export class SessionService {
-  private readonly sessionSecret =
-    process.env.SESSION_SECRET ?? "dev-insecure-secret-change-me";
+  private readonly sessionSecret: string;
+
+  constructor() {
+    const secret = process.env.SESSION_SECRET?.trim();
+    if (!secret) {
+      throw new Error("SESSION_SECRET is required");
+    }
+
+    this.sessionSecret = secret;
+  }
 
   createSessionCookie(payload: SessionPayload) {
     const value = this.signPayload(payload);
