@@ -4,6 +4,7 @@ import { SessionPayload } from "../auth/auth.types";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { ConversationsController } from "./conversations.controller";
 import { ConversationsService } from "./conversations.service";
+import { AddTagDto } from "./dto/add-tag.dto";
 import { AssignConversationDto } from "./dto/assign-conversation.dto";
 import { CreateMessageDto } from "./dto/create-message.dto";
 
@@ -17,6 +18,9 @@ describe("ConversationsController", () => {
     listConversationMessages: jest.Mock;
     createOutboundMessage: jest.Mock;
     assignConversation: jest.Mock;
+    listConversationTags: jest.Mock;
+    addTagToConversation: jest.Mock;
+    removeTagFromConversation: jest.Mock;
   };
   const session: SessionPayload = {
     userId: "user_1",
@@ -32,6 +36,9 @@ describe("ConversationsController", () => {
       listConversationMessages: jest.fn(),
       createOutboundMessage: jest.fn(),
       assignConversation: jest.fn(),
+      listConversationTags: jest.fn(),
+      addTagToConversation: jest.fn(),
+      removeTagFromConversation: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -210,5 +217,82 @@ describe("ConversationsController", () => {
         metadata,
       ),
     ).rejects.toThrow();
+  });
+
+  // ── Tag endpoint tests ──────────────────────────────────
+
+  it("should list tags via service", async () => {
+    service.listConversationTags.mockResolvedValue([{ id: "t1", name: "vip" }]);
+
+    const result = await controller.getConversationTags("c1", session);
+
+    expect(result).toEqual([{ id: "t1", name: "vip" }]);
+    expect(service.listConversationTags).toHaveBeenCalledWith("org_1", "c1");
+  });
+
+  it("should add tag via service", async () => {
+    service.addTagToConversation.mockResolvedValue({ id: "t1", name: "vip" });
+
+    const result = await controller.addTag("c1", { name: "VIP" }, session);
+
+    expect(result).toEqual({ id: "t1", name: "vip" });
+    expect(service.addTagToConversation).toHaveBeenCalledWith("org_1", "c1", "VIP");
+  });
+
+  it("should remove tag via service", async () => {
+    service.removeTagFromConversation.mockResolvedValue(undefined);
+
+    await controller.removeTag("c1", "t1", session);
+
+    expect(service.removeTagFromConversation).toHaveBeenCalledWith("org_1", "c1", "t1");
+  });
+
+  it("should reject blank tag name", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: AddTagDto,
+      data: "",
+    };
+
+    await expect(pipe.transform({ name: "   " }, metadata)).rejects.toThrow();
+  });
+
+  it("should reject tag payload with unknown fields", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: AddTagDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ name: "vip", extra: "nope" }, metadata),
+    ).rejects.toThrow();
+  });
+
+  it("should accept valid tag name", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: AddTagDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ name: "VIP" }, metadata),
+    ).resolves.toEqual({ name: "VIP" });
   });
 });

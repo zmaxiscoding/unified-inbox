@@ -28,6 +28,7 @@ type ConversationListItem = {
       email: string;
     };
   } | null;
+  tags: { tag: { id: string; name: string } }[];
 };
 
 @Injectable()
@@ -55,6 +56,12 @@ export class ConversationsService {
             },
           },
         },
+        tags: {
+          orderBy: { createdAt: "asc" as const },
+          select: {
+            tag: { select: { id: true, name: true } },
+          },
+        },
       },
     });
 
@@ -72,6 +79,7 @@ export class ConversationsService {
             },
           }
         : null,
+      tags: conversation.tags.map((ct) => ct.tag),
     }));
   }
 
@@ -244,6 +252,93 @@ export class ConversationsService {
           }
         : null,
     };
+  }
+
+  async listConversationTags(
+    organizationId: string,
+    conversationId: string,
+  ) {
+    const conversation = await this.getConversationInOrganization(
+      organizationId,
+      conversationId,
+    );
+
+    const conversationTags = await this.prisma.conversationTag.findMany({
+      where: { conversationId: conversation.id },
+      orderBy: { createdAt: "asc" },
+      select: {
+        tag: { select: { id: true, name: true } },
+      },
+    });
+
+    return conversationTags.map((ct) => ct.tag);
+  }
+
+  async addTagToConversation(
+    organizationId: string,
+    conversationId: string,
+    rawName: string,
+  ) {
+    const conversation = await this.getConversationInOrganization(
+      organizationId,
+      conversationId,
+    );
+
+    const name = rawName.trim().toLowerCase();
+
+    const tag = await this.prisma.tag.upsert({
+      where: {
+        organizationId_name: { organizationId, name },
+      },
+      update: {},
+      create: { name, organizationId },
+    });
+
+    await this.prisma.conversationTag.upsert({
+      where: {
+        conversationId_tagId: {
+          conversationId: conversation.id,
+          tagId: tag.id,
+        },
+      },
+      update: {},
+      create: { conversationId: conversation.id, tagId: tag.id },
+    });
+
+    return { id: tag.id, name: tag.name };
+  }
+
+  async removeTagFromConversation(
+    organizationId: string,
+    conversationId: string,
+    tagId: string,
+  ) {
+    const conversation = await this.getConversationInOrganization(
+      organizationId,
+      conversationId,
+    );
+
+    const link = await this.prisma.conversationTag.findUnique({
+      where: {
+        conversationId_tagId: {
+          conversationId: conversation.id,
+          tagId,
+        },
+      },
+    });
+
+    if (!link) {
+      throw new NotFoundException("Tag not found on this conversation");
+    }
+
+    await this.prisma.conversationTag.delete({
+      where: {
+        conversationId_tagId: {
+          conversationId: conversation.id,
+          tagId,
+        },
+      },
+    });
   }
 
   private async getConversationInOrganization(

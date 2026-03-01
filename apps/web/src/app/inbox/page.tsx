@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type AssignedMembership = {
@@ -12,12 +12,18 @@ type AssignedMembership = {
   };
 };
 
+type Tag = {
+  id: string;
+  name: string;
+};
+
 type Conversation = {
   id: string;
   customerDisplay: string;
   lastMessageAt: string | null;
   channelProvider: "WHATSAPP" | "INSTAGRAM" | string;
   assignedMembership: AssignedMembership | null;
+  tags: Tag[];
 };
 
 type Message = {
@@ -94,6 +100,8 @@ export default function InboxPage() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isLoadingMembers, setIsLoadingMembers] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
+  const [tagInput, setTagInput] = useState("");
+  const [isAddingTag, setIsAddingTag] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -268,6 +276,88 @@ export default function InboxPage() {
     }
   };
 
+  const updateConversationTags = useCallback(
+    (conversationId: string, tags: Tag[]) => {
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === conversationId ? { ...conversation, tags } : conversation,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleAddTag = async () => {
+    const name = tagInput.trim();
+    if (!selectedConversationId || !name || isAddingTag) return;
+
+    setIsAddingTag(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch(`/api/conversations/${selectedConversationId}/tags`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Add tag failed: ${response.status}`);
+      }
+
+      const newTag = (await response.json()) as Tag;
+      const currentTags = selectedConversation?.tags ?? [];
+      const alreadyExists = currentTags.some((t) => t.id === newTag.id);
+      if (!alreadyExists) {
+        updateConversationTags(selectedConversationId, [...currentTags, newTag]);
+      }
+      setTagInput("");
+    } catch {
+      setErrorMessage("Etiket eklenemedi.");
+    } finally {
+      setIsAddingTag(false);
+    }
+  };
+
+  const handleRemoveTag = async (tagId: string) => {
+    if (!selectedConversationId) return;
+
+    const currentTags = selectedConversation?.tags ?? [];
+    updateConversationTags(
+      selectedConversationId,
+      currentTags.filter((t) => t.id !== tagId),
+    );
+
+    try {
+      const response = await fetch(
+        `/api/conversations/${selectedConversationId}/tags/${tagId}`,
+        { method: "DELETE" },
+      );
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        updateConversationTags(selectedConversationId, currentTags);
+        throw new Error(`Remove tag failed: ${response.status}`);
+      }
+    } catch {
+      setErrorMessage("Etiket kaldırılamadı.");
+    }
+  };
+
+  const handleTagKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void handleAddTag();
+    }
+  };
+
   const handleAssign = async (nextMembershipId: string | null) => {
     if (!selectedConversationId || !selectedConversation || isAssigning) {
       return;
@@ -427,6 +517,36 @@ export default function InboxPage() {
               </button>
             </div>
           </header>
+
+          {selectedConversation ? (
+            <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 px-6 py-2">
+              {selectedConversation.tags.map((tag) => (
+                <span
+                  key={tag.id}
+                  className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700"
+                >
+                  {tag.name}
+                  <button
+                    type="button"
+                    onClick={() => void handleRemoveTag(tag.id)}
+                    className="ml-0.5 text-slate-400 hover:text-slate-700"
+                    aria-label={`${tag.name} etiketini kaldır`}
+                  >
+                    &times;
+                  </button>
+                </span>
+              ))}
+              <input
+                type="text"
+                value={tagInput}
+                onChange={(event) => setTagInput(event.target.value)}
+                onKeyDown={handleTagKeyDown}
+                placeholder="Etiket ekle..."
+                disabled={isAddingTag}
+                className="h-7 w-28 rounded border border-slate-200 px-2 text-xs outline-none focus:border-slate-400 disabled:bg-slate-50"
+              />
+            </div>
+          ) : null}
 
           {errorMessage ? (
             <div className="border-b border-red-200 bg-red-50 px-6 py-3 text-sm text-red-700">
