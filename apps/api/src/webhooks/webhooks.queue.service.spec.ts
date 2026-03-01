@@ -15,7 +15,10 @@ jest.mock("bullmq", () => {
     add = queueAddMock;
     close = queueCloseMock;
 
-    constructor(_queueName: string, _options: unknown) {}
+    constructor(_queueName: string, _options: unknown) {
+      void _queueName;
+      void _options;
+    }
   }
 
   class MockWorker {
@@ -27,6 +30,8 @@ jest.mock("bullmq", () => {
       processor: (job: { data: { rawWebhookEventId: string } }) => Promise<void>,
       _options: unknown,
     ) {
+      void _queueName;
+      void _options;
       capturedProcessor = processor;
     }
   }
