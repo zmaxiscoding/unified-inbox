@@ -52,6 +52,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Prisma generate
+        run: pnpm --filter api exec prisma generate
+
+      - name: Prisma migrate
+        run: pnpm --filter api exec prisma migrate deploy
+
       - name: Lint
         run: pnpm lint
 

@@ -35,11 +35,10 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships         Membership[]
-  assignedConversations Conversation[] @relation("AssignedAgent")
-  messages            Message[]
-  notes               Note[]
-  auditLogs           AuditLog[]
+  memberships Membership[]
+  messages    Message[]
+  notes       Note[]
+  auditLogs   AuditLog[]
 
   @@map("users")
 }
@@ -57,10 +56,13 @@ model Membership {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization          Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user                  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedConversations Conversation[]
 
   @@unique([organizationId, userId])
+  // Required for the composite FK from Conversation (enforces cross-tenant safety at DB level)
+  @@unique([id, organizationId])
   @@map("memberships")
 }
 
@@ -97,30 +99,33 @@ enum ConversationStatus {
 }
 
 model Conversation {
-  id              String             @id @default(cuid())
-  status          ConversationStatus @default(OPEN)
-  contactName     String
-  contactPhone    String?
-  contactAvatar   String?
-  lastMessageAt   DateTime?
-  lastMessageText String?
-  isUnread        Boolean            @default(true)
-  organizationId  String
-  channelId       String
-  assignedToId    String?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  id                   String             @id @default(cuid())
+  status               ConversationStatus @default(OPEN)
+  contactName          String
+  contactPhone         String?
+  contactAvatar        String?
+  lastMessageAt        DateTime?
+  lastMessageText      String?
+  isUnread             Boolean            @default(true)
+  organizationId       String
+  channelId            String
+  // Composite FK to Membership(id, organizationId): DB enforces assignee is in the same org
+  assignedMembershipId String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  channel      Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  assignedTo   User?        @relation("AssignedAgent", fields: [assignedToId], references: [id], onDelete: SetNull)
-  messages     Message[]
-  notes        Note[]
-  tags         ConversationTag[]
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  channel            Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  // onDelete: Restrict — app must unassign before removing a member
+  // (SetNull unsafe on composite FK where organizationId is NOT NULL)
+  assignedMembership Membership?  @relation(fields: [assignedMembershipId, organizationId], references: [id, organizationId], onDelete: Restrict)
+  messages           Message[]
+  notes              Note[]
+  tags               ConversationTag[]
 
   @@index([organizationId, status])
   @@index([organizationId, lastMessageAt(sort: Desc)])
-  @@index([assignedToId])
+  @@index([assignedMembershipId])
   @@map("conversations")
 }
 

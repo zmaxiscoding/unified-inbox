@@ -3,6 +3,10 @@ import { PrismaClient, Role, ChannelType, ConversationStatus, MessageDirection }
 const prisma = new PrismaClient();
 
 async function main() {
+  // Clean existing seed data (idempotent re-run)
+  await prisma.organization.deleteMany({ where: { slug: "acme-store" } });
+  await prisma.user.deleteMany({ where: { email: { in: ["owner@acme.com", "agent@acme.com"] } } });
+
   // Organization
   const org = await prisma.organization.create({
     data: { name: "Acme Store", slug: "acme-store" },
@@ -16,12 +20,12 @@ async function main() {
     data: { email: "agent@acme.com", name: "Zeynep Demir" },
   });
 
-  // Memberships
-  await prisma.membership.createMany({
-    data: [
-      { organizationId: org.id, userId: owner.id, role: Role.OWNER },
-      { organizationId: org.id, userId: agent.id, role: Role.AGENT },
-    ],
+  // Memberships (create individually to capture IDs for conversation assignment)
+  const ownerMembership = await prisma.membership.create({
+    data: { organizationId: org.id, userId: owner.id, role: Role.OWNER },
+  });
+  const agentMembership = await prisma.membership.create({
+    data: { organizationId: org.id, userId: agent.id, role: Role.AGENT },
   });
 
   // Channels
@@ -51,7 +55,7 @@ async function main() {
       lastMessageText: "Siparişim ne zaman kargoya verilecek?",
       organizationId: org.id,
       channelId: whatsapp.id,
-      assignedToId: agent.id,
+      assignedMembershipId: agentMembership.id,
     },
   });
 
@@ -124,7 +128,7 @@ async function main() {
       lastMessageText: "Teşekkürler, sorun çözüldü!",
       organizationId: org.id,
       channelId: whatsapp.id,
-      assignedToId: owner.id,
+      assignedMembershipId: ownerMembership.id,
     },
   });
 
