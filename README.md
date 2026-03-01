@@ -106,6 +106,35 @@ curl -b cookie.txt http://localhost:3001/conversations/<conversationId>/notes
 curl -b cookie.txt -X POST http://localhost:3001/conversations/<conversationId>/notes \
   -H "Content-Type: application/json" \
   -d '{"body":"Müşteri VIP, öncelikli destek."}'
+
+# Team & invites listele
+curl -b cookie.txt http://localhost:3001/team
+
+# Yeni davet oluştur (OWNER yetkisi gerekli)
+curl -b cookie.txt -X POST http://localhost:3001/invites \
+  -H "Content-Type: application/json" \
+  -d '{"email":"newagent@acme.com","role":"AGENT"}'
+
+# Daveti kabul et (yeni kullanıcı)
+curl -i -c cookie.txt -X POST http://localhost:3001/invites/accept \
+  -H "Content-Type: application/json" \
+  -d '{"token":"<hex_token>","name":"Yeni Ajan","password":"guclu-sifre-123"}'
+
+# Daveti kabul et (mevcut kullanıcı)
+curl -i -c cookie.txt -X POST http://localhost:3001/invites/accept \
+  -H "Content-Type: application/json" \
+  -d '{"token":"<hex_token>"}'
+
+# Daveti iptal et (OWNER yetkisi gerekli)
+curl -b cookie.txt -X DELETE http://localhost:3001/invites/<inviteId>
+
+# Üye rolünü değiştir (OWNER yetkisi gerekli)
+curl -b cookie.txt -X PATCH http://localhost:3001/memberships/<membershipId>/role \
+  -H "Content-Type: application/json" \
+  -d '{"role":"OWNER"}'
+
+# Üyeyi kaldır (OWNER yetkisi gerekli)
+curl -b cookie.txt -X DELETE http://localhost:3001/memberships/<membershipId>
 ```
 
 ## UI Nasıl Çalıştırılır
