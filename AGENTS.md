@@ -98,3 +98,12 @@ pnpm dev
 pnpm lint   # ✅ hatasız
 pnpm test   # ✅ tüm testler geçti
 ```
+
+## Security & Provider Rules
+
+- Secrets & Tokens: never commit, never log, never return in API responses; if stored in DB, mark `TODO(encrypt)` and never expose.
+- Provider mapping: `X-ORG-ID` header allowed only in dev/staging behind feature flag; prod must map via `ChannelAccount`.
+- Webhooks: signature verification required for real providers (phase 2); without verify only dev flag.
+- PII: do not log raw webhook payloads.
+- ID validation: `cuid()` -> avoid `@IsUUID()`; prefer `@IsString()` + DB existence.
+- Tests: ensure token not returned; unmapped `phone_number_id` -> `400`.
