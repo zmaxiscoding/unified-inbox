@@ -14,6 +14,22 @@ Bu dosya, bu repoda çalışan AI agent'lar ve geliştiriciler için kesin kural
 5. **Webhook endpoint'leri senkron iş yapmaz.** Gelen payload'ı doğrula → BullMQ kuyruğuna at → hemen `200 OK` dön. Ağır iş worker'da yapılır.
 6. **pnpm workspace düzenini bozma.** `pnpm-workspace.yaml` tanımına (`apps/*`, `packages/*`) uy. Workspace dışına paket ekleme, hoist konfigürasyonunu değiştirme.
 
+## ID Validation Rule
+
+- Prisma schema'daki `id` generator ile DTO validation uyumlu olmalıdır.
+- Bu repoda Prisma `@default(cuid())` kullanır; DTO'da `@IsUUID()` kullanılmaz.
+- ID doğrulaması gerekiyorsa:
+  - CUID için `@Matches(/^c[a-z0-9]{24}$/i)` kullan.
+  - Alternatif olarak yalnızca `@IsString()` + service-level existence check yap.
+- Prensip: "Gerçek sistemde DB lookup zaten doğrular." DTO validation temel type/shape doğrulaması yapmalıdır.
+
+## PR Checklist
+
+- Yeni endpoint eklendiyse: request body validation + testler zorunludur.
+- Unassign gibi `null` flow varsa: `null` ve missing-field testleri zorunludur.
+- Seed'den dönen ID'ler ile endpoint çağrısı için E2E smoke doğrulaması zorunludur:
+  - En az 1 test veya README example doğrulaması.
+
 ## Teknoloji Yığını
 
 | Katman | Teknoloji |
