@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type AssignedMembership = {
@@ -121,6 +121,8 @@ export default function InboxPage() {
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  const activeConversationRef = useRef<string | null>(null);
+
   const selectedConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
     [conversations, selectedConversationId],
@@ -222,6 +224,7 @@ export default function InboxPage() {
       const response = await fetch(`/api/conversations/${conversationId}/messages`, {
         cache: "no-store",
       });
+      if (activeConversationRef.current !== conversationId) return;
       if (response.status === 401) {
         router.replace("/login");
         return;
@@ -231,11 +234,16 @@ export default function InboxPage() {
       }
 
       const data = (await response.json()) as Message[];
+      if (activeConversationRef.current !== conversationId) return;
       setMessages(data);
     } catch {
-      setErrorMessage("Mesajlar alınırken hata oluştu.");
+      if (activeConversationRef.current === conversationId) {
+        setErrorMessage("Mesajlar alınırken hata oluştu.");
+      }
     } finally {
-      setIsLoadingMessages(false);
+      if (activeConversationRef.current === conversationId) {
+        setIsLoadingMessages(false);
+      }
     }
   }, [router]);
 
@@ -246,6 +254,7 @@ export default function InboxPage() {
       const response = await fetch(`/api/conversations/${conversationId}/notes`, {
         cache: "no-store",
       });
+      if (activeConversationRef.current !== conversationId) return;
       if (response.status === 401) {
         router.replace("/login");
         return;
@@ -255,11 +264,16 @@ export default function InboxPage() {
       }
 
       const data = (await response.json()) as Note[];
+      if (activeConversationRef.current !== conversationId) return;
       setNotes(data);
     } catch {
-      setErrorMessage("Notlar alınırken hata oluştu.");
+      if (activeConversationRef.current === conversationId) {
+        setErrorMessage("Notlar alınırken hata oluştu.");
+      }
     } finally {
-      setIsLoadingNotes(false);
+      if (activeConversationRef.current === conversationId) {
+        setIsLoadingNotes(false);
+      }
     }
   }, [router]);
 
@@ -278,7 +292,11 @@ export default function InboxPage() {
   }, [fetchConversations, fetchMembers, isCheckingSession, session]);
 
   useEffect(() => {
+    activeConversationRef.current = selectedConversationId;
     if (!selectedConversationId) return;
+    setMessages([]);
+    setNotes([]);
+    setNoteInput("");
     void fetchMessages(selectedConversationId);
     void fetchNotes(selectedConversationId);
   }, [fetchMessages, fetchNotes, selectedConversationId]);
