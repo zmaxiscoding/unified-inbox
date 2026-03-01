@@ -7,7 +7,11 @@
     "dev": "concurrently --kill-others-on-fail \"pnpm --filter web dev\" \"pnpm --filter api dev\"",
     "lint": "pnpm --filter web lint && pnpm --filter api lint",
     "test": "pnpm --filter web test && pnpm --filter api test",
-    "build": "pnpm --filter web build && pnpm --filter api build"
+    "build": "pnpm --filter web build && pnpm --filter api build",
+    "prisma:generate": "pnpm --filter api exec prisma generate",
+    "db:migrate": "pnpm --filter api exec prisma migrate dev",
+    "db:seed": "pnpm --filter api exec prisma db seed",
+    "db:reset": "pnpm --filter api exec prisma migrate reset --force"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
