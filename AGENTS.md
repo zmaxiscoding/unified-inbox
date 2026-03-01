@@ -1,28 +1,31 @@
 # AGENTS.md
 
-Bu dosya, bu repoda çalışan AI agent'lar (ve insan geliştiriciler) için kuralları ve mimari kararları tanımlar.
+Bu dosya, bu repoda çalışan AI agent'lar ve geliştiriciler için kesin kuralları tanımlar.
 
-## Genel Kurallar
+## Kesin Kurallar
 
-- **Secrets asla commit edilmez.** Tüm hassas değerler `.env` dosyasında tutulur; repoya yalnızca `.env.example` eklenir.
-- **Her iş yeni bir branch üzerinde yapılır.** `main`'e direkt commit atılmaz; değişiklikler Pull Request (PR) aracılığıyla birleştirilir.
-- **Her PR şunları içermeli:**
-  - Değişikliğin özeti (ne yapıldı, neden yapıldı)
-  - Nasıl çalıştırılır (kurulum adımları, komutlar)
-  - Linter ve test sonuçları (çıktı veya "geçti" notu)
+1. **Secrets asla commit edilmez.** Hassas değerler `.env` dosyasında tutulur; repoya yalnızca `.env.example` eklenir. `.env`, `.env.local`, `.env.*.local` dosyaları `.gitignore`'da listelenir.
+2. **Her iş yeni bir branch üzerinde yapılır.** `main`'e direkt commit atılmaz. Tüm değişiklikler Pull Request (PR) ile birleştirilir.
+3. **Her PR şunları içermelidir:**
+   - Değişikliğin özeti (ne yapıldı, neden yapıldı)
+   - Nasıl çalıştırılır (kurulum adımları, komutlar)
+   - `pnpm lint` ve `pnpm test` sonuçları
+4. **Webhook idempotency:** Her webhook event'i `providerMessageId` ile unique'dir. Aynı `providerMessageId` ile gelen tekrar event'ler no-op olarak işlenir (duplicate event = skip).
+5. **Webhook endpoint'leri senkron iş yapmaz.** Gelen payload'ı doğrula → BullMQ kuyruğuna at → hemen `200 OK` dön. Ağır iş worker'da yapılır.
+6. **pnpm workspace düzenini bozma.** `pnpm-workspace.yaml` tanımına (`apps/*`, `packages/*`) uy. Workspace dışına paket ekleme, hoist konfigürasyonunu değiştirme.
 
 ## Teknoloji Yığını
 
 | Katman | Teknoloji |
 |--------|-----------|
-| Dil | TypeScript (strict mod) |
+| Dil | TypeScript (strict) |
 | Paket yöneticisi | pnpm workspace (monorepo) |
 | Frontend | Next.js (App Router) + Tailwind CSS |
 | Backend | NestJS + Prisma ORM |
 | Veritabanı | PostgreSQL |
 | Cache / Queue | Redis |
 | Job queue | BullMQ (Redis üzerinde) |
-| Altyapı (geliştirme) | docker-compose |
+| Altyapı (dev) | docker-compose (postgres + redis) |
 
 ## Monorepo Yapısı
 
@@ -33,23 +36,22 @@ Bu dosya, bu repoda çalışan AI agent'lar (ve insan geliştiriciler) için kur
 │   └── api/          # NestJS + Prisma + PostgreSQL
 ├── packages/         # Paylaşılan kütüphaneler (types, utils vb.)
 ├── docker-compose.yml
-├── .env.example
-└── pnpm-workspace.yaml
+├── pnpm-workspace.yaml
+└── package.json      # root scripts: dev, lint, test, build
 ```
 
-## Mimari Kararlar
+## Webhook Akışı
 
-### Webhook İşleme
-Gelen webhook'lar **asla senkron olarak işlenmez**. Akış şu şekildedir:
-
-1. API endpoint webhook'u alır ve bir **BullMQ job**'ı kuyruğa ekler.
-2. Kuyruk worker'ı işi asenkron olarak işler.
-3. Bu sayede timeout riski ortadan kalkar ve yeniden deneme (retry) mekanizması sağlanır.
-
-### Geliştirme Ortamı
-`docker-compose` aşağıdaki servisleri ayağa kaldırır:
-- `postgres` — uygulama veritabanı
-- `redis` — cache ve BullMQ queue backend'i
+```
+Provider (WhatsApp/Instagram)
+  → POST /webhooks/:provider
+    → Signature doğrula
+    → providerMessageId duplicate kontrolü
+    → BullMQ queue'ya job ekle
+    → 200 OK dön (< 500ms)
+      → Worker job'ı asenkron işler
+        → Retry + dead-letter queue
+```
 
 ## Branch Adlandırma
 
@@ -61,16 +63,17 @@ chore/<kısa-açıklama>
 
 ## PR Şablonu
 
-```
+```markdown
 ## Özet
 <!-- Ne değişti ve neden? -->
 
 ## Nasıl Çalıştırılır
-<!-- Kurulum ve test adımları -->
+docker compose up -d
 pnpm install
 pnpm --filter api prisma migrate dev
 pnpm dev
 
 ## Test / Linter Sonuçları
-<!-- pnpm lint ve pnpm test çıktısı -->
+pnpm lint   # ✅ hatasız
+pnpm test   # ✅ tüm testler geçti
 ```
