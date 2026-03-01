@@ -62,6 +62,11 @@ pnpm test     # tüm workspace'lerde test çalıştırır
 └── PRD.md            # Ürün gereksinimleri
 ```
 
+## CI
+
+Her PR'da GitHub Actions otomatik çalışır: `install → lint → test → build`.
+**CI yeşil olmadan merge yapılmaz.**
+
 ## Altyapı
 
 - **PostgreSQL 16** — `localhost:5432`, db: `unified_inbox`

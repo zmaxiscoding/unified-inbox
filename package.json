@@ -2,6 +2,7 @@
   "name": "unified-inbox",
   "version": "0.1.0",
   "private": true,
+  "packageManager": "pnpm@9.15.0",
   "scripts": {
     "dev": "concurrently --kill-others-on-fail \"pnpm --filter web dev\" \"pnpm --filter api dev\"",
     "lint": "pnpm --filter web lint && pnpm --filter api lint",
