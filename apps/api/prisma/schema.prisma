@@ -20,6 +20,7 @@ model Organization {
   channels      Channel[]
   conversations Conversation[]
   tags          Tag[]
+  invitations   Invitation[]
   auditLogs     AuditLog[]
 
   @@map("organizations")
@@ -28,12 +29,13 @@ model Organization {
 // ─── Users & Roles ───────────────────────────────────────
 
 model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  avatarUrl String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String
+  passwordHash String?
+  avatarUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   memberships Membership[]
   messages    Message[]
@@ -59,6 +61,7 @@ model Membership {
   organization          Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user                  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   assignedConversations Conversation[]
+  createdInvitations    Invitation[]
 
   @@unique([organizationId, userId])
   // Required for the composite FK from Conversation (enforces cross-tenant safety at DB level)
@@ -193,6 +196,27 @@ model ConversationTag {
 
   @@id([conversationId, tagId])
   @@map("conversation_tags")
+}
+
+// ─── Invitations ──────────────────────────────────────
+
+model Invitation {
+  id                    String    @id @default(cuid())
+  email                 String
+  role                  Role      @default(AGENT)
+  tokenHash             String    @unique
+  expiresAt             DateTime
+  acceptedAt            DateTime?
+  revokedAt             DateTime?
+  organizationId        String
+  createdByMembershipId String
+  createdAt             DateTime  @default(now())
+
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdByMembership Membership   @relation(fields: [createdByMembershipId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, email])
+  @@map("invitations")
 }
 
 // ─── Audit Log ───────────────────────────────────────────

@@ -1,4 +1,5 @@
 import { PrismaClient, Role, ChannelType, ConversationStatus, MessageDirection } from "@prisma/client";
+import { createHash, randomBytes } from "node:crypto";
 
 const prisma = new PrismaClient();
 
@@ -159,7 +160,23 @@ async function main() {
     ],
   });
 
-  console.log("Seed completed: 1 org, 2 users, 2 channels, 3 conversations, 4 messages, 2 tags, 1 note, 3 audit logs");
+  // Sample invitation
+  const sampleToken = randomBytes(32).toString("hex");
+  const sampleTokenHash = createHash("sha256").update(sampleToken).digest("hex");
+
+  await prisma.invitation.create({
+    data: {
+      email: "newagent@acme.com",
+      role: Role.AGENT,
+      tokenHash: sampleTokenHash,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      organizationId: org.id,
+      createdByMembershipId: ownerMembership.id,
+    },
+  });
+
+  console.log("Seed completed: 1 org, 2 users, 2 channels, 3 conversations, 4 messages, 2 tags, 1 note, 1 invitation, 3 audit logs");
+  console.log(`Sample invite token (for testing): ${sampleToken}`);
 }
 
 main()
