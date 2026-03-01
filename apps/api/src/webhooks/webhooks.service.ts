@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import { ChannelType, Prisma } from "@prisma/client";
+import { ChannelType, Prisma, WebhookProcessingStatus } from "@prisma/client";
 import { createHash } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import {
@@ -47,11 +47,36 @@ export class WebhooksService {
       return { ok: true };
     } catch (error) {
       if (this.isUniqueConstraintError(error)) {
+        await this.reenqueueIfPendingDuplicate(ChannelType.WHATSAPP, providerMessageId);
         return { ok: true, duplicate: true };
       }
 
       throw error;
     }
+  }
+
+  private async reenqueueIfPendingDuplicate(
+    provider: ChannelType,
+    providerMessageId: string,
+  ) {
+    const existingEvent = await this.prisma.rawWebhookEvent.findUnique({
+      where: {
+        provider_providerMessageId: {
+          provider,
+          providerMessageId,
+        },
+      },
+      select: {
+        id: true,
+        processingStatus: true,
+      },
+    });
+
+    if (!existingEvent || existingEvent.processingStatus !== WebhookProcessingStatus.PENDING) {
+      return;
+    }
+
+    await this.queue.enqueue(existingEvent.id);
   }
 
   private async resolveOrganizationId(

@@ -1,3 +1,4 @@
+import { WebhookProcessingStatus } from "@prisma/client";
 import { BadRequestException } from "@nestjs/common";
 import { PrismaService } from "../prisma/prisma.service";
 import { WebhooksQueueService } from "./webhooks.queue.service";
@@ -62,6 +63,7 @@ describe("WebhooksService", () => {
     };
     rawWebhookEvent: {
       create: jest.Mock;
+      findUnique: jest.Mock;
     };
   };
   let queue: {
@@ -80,6 +82,7 @@ describe("WebhooksService", () => {
       },
       rawWebhookEvent: {
         create: jest.fn(),
+        findUnique: jest.fn(),
       },
     };
 
@@ -147,11 +150,51 @@ describe("WebhooksService", () => {
   it("should no-op duplicate providerMessageId", async () => {
     prisma.channelAccount.findFirst.mockResolvedValue({ organizationId: "org_1" });
     prisma.rawWebhookEvent.create.mockRejectedValue({ code: "P2002" });
+    prisma.rawWebhookEvent.findUnique.mockResolvedValue({
+      id: "rwe_1",
+      processingStatus: WebhookProcessingStatus.PROCESSED,
+    });
 
     const result = await service.handleWhatsAppWebhook(WHATSAPP_TEXT_PAYLOAD);
 
     expect(result).toEqual({ ok: true, duplicate: true });
     expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("should re-enqueue pending duplicate when first enqueue failed", async () => {
+    prisma.channelAccount.findFirst.mockResolvedValue({ organizationId: "org_1" });
+    prisma.rawWebhookEvent.create
+      .mockResolvedValueOnce({ id: "rwe_pending" })
+      .mockRejectedValueOnce({ code: "P2002" });
+    prisma.rawWebhookEvent.findUnique.mockResolvedValue({
+      id: "rwe_pending",
+      processingStatus: WebhookProcessingStatus.PENDING,
+    });
+    queue.enqueue.mockRejectedValueOnce(new Error("redis unavailable"));
+    queue.enqueue.mockResolvedValueOnce(undefined);
+
+    await expect(
+      service.handleWhatsAppWebhook(WHATSAPP_TEXT_PAYLOAD),
+    ).rejects.toThrow("redis unavailable");
+
+    const retryResult = await service.handleWhatsAppWebhook(WHATSAPP_TEXT_PAYLOAD);
+
+    expect(retryResult).toEqual({ ok: true, duplicate: true });
+    expect(prisma.rawWebhookEvent.findUnique).toHaveBeenCalledWith({
+      where: {
+        provider_providerMessageId: {
+          provider: "WHATSAPP",
+          providerMessageId: "wamid.abc123",
+        },
+      },
+      select: {
+        id: true,
+        processingStatus: true,
+      },
+    });
+    expect(queue.enqueue).toHaveBeenCalledTimes(2);
+    expect(queue.enqueue).toHaveBeenNthCalledWith(1, "rwe_pending");
+    expect(queue.enqueue).toHaveBeenNthCalledWith(2, "rwe_pending");
   });
 
   it("should accept mapped non-text updates and enqueue", async () => {
