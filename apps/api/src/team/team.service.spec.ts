@@ -3,6 +3,7 @@ import {
   ForbiddenException,
   NotFoundException,
 } from "@nestjs/common";
+import { Role } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { SessionService } from "../auth/session.service";
 import { TeamService } from "./team.service";
@@ -117,7 +118,7 @@ describe("TeamService", () => {
     });
 
     await expect(
-      service.createInvite("org_1", "u1", "new@acme.com", "AGENT" as any),
+      service.createInvite("org_1", "u1", "new@acme.com", Role.AGENT),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
@@ -130,7 +131,7 @@ describe("TeamService", () => {
     prisma.membership.findFirst.mockResolvedValue({ id: "mem_existing" });
 
     await expect(
-      service.createInvite("org_1", "u1", "existing@acme.com", "AGENT" as any),
+      service.createInvite("org_1", "u1", "existing@acme.com", Role.AGENT),
     ).rejects.toEqual(
       new BadRequestException(
         "User is already a member of this organization",
@@ -148,7 +149,7 @@ describe("TeamService", () => {
     prisma.invitation.findFirst.mockResolvedValue({ id: "inv_existing" });
 
     await expect(
-      service.createInvite("org_1", "u1", "dup@acme.com", "AGENT" as any),
+      service.createInvite("org_1", "u1", "dup@acme.com", Role.AGENT),
     ).rejects.toEqual(
       new BadRequestException(
         "A pending invitation already exists for this email",
@@ -171,7 +172,7 @@ describe("TeamService", () => {
       "org_1",
       "u1",
       "new@acme.com",
-      "AGENT" as any,
+      Role.AGENT,
     );
 
     expect(result.inviteId).toBe("inv_1");
@@ -378,7 +379,7 @@ describe("TeamService", () => {
     });
 
     await expect(
-      service.updateMemberRole("org_1", "u1", "mem_2", "OWNER" as any),
+      service.updateMemberRole("org_1", "u1", "mem_2", Role.OWNER),
     ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
@@ -396,7 +397,7 @@ describe("TeamService", () => {
     prisma.membership.count.mockResolvedValue(1);
 
     await expect(
-      service.updateMemberRole("org_1", "u1", "mem_target", "AGENT" as any),
+      service.updateMemberRole("org_1", "u1", "mem_target", Role.AGENT),
     ).rejects.toEqual(
       new BadRequestException("Cannot downgrade the last owner"),
     );
@@ -424,7 +425,7 @@ describe("TeamService", () => {
       "org_1",
       "u1",
       "mem_target",
-      "OWNER" as any,
+      Role.OWNER,
     );
 
     expect(result.role).toBe("OWNER");

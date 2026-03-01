@@ -1,5 +1,6 @@
 import { ArgumentMetadata, ValidationPipe } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
+import { Role } from "@prisma/client";
 import { SessionPayload } from "../auth/auth.types";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { MembershipsController } from "./memberships.controller";
@@ -53,7 +54,7 @@ describe("MembershipsController", () => {
 
     const result = await controller.updateRole(
       "mem_1",
-      { role: "OWNER" as any },
+      { role: Role.OWNER },
       session,
     );
 

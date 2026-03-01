@@ -1,5 +1,7 @@
 import { ArgumentMetadata, ValidationPipe } from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
+import { Role } from "@prisma/client";
+import { Response } from "express";
 import { SessionPayload } from "../auth/auth.types";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { InvitesController } from "./invites.controller";
@@ -52,7 +54,7 @@ describe("InvitesController", () => {
     });
 
     const result = await controller.createInvite(
-      { email: "new@acme.com", role: "AGENT" as any },
+      { email: "new@acme.com", role: Role.AGENT },
       session,
     );
 
@@ -73,7 +75,7 @@ describe("InvitesController", () => {
       sessionCookie: "ui_session=signed_value",
     });
 
-    const res = { setHeader: jest.fn() } as any;
+    const res = { setHeader: jest.fn() } as unknown as Response;
     const result = await controller.acceptInvite(
       { token: "a".repeat(64) },
       res,
