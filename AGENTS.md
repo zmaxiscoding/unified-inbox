@@ -13,6 +13,10 @@ Bu dosya, bu repoda çalışan AI agent'lar ve geliştiriciler için kesin kural
 4. **Webhook idempotency:** Her webhook event'i `providerMessageId` ile unique'dir. Aynı `providerMessageId` ile gelen tekrar event'ler no-op olarak işlenir (duplicate event = skip).
 5. **Webhook endpoint'leri senkron iş yapmaz.** Gelen payload'ı doğrula → BullMQ kuyruğuna at → hemen `200 OK` dön. Ağır iş worker'da yapılır.
 6. **pnpm workspace düzenini bozma.** `pnpm-workspace.yaml` tanımına (`apps/*`, `packages/*`) uy. Workspace dışına paket ekleme, hoist konfigürasyonunu değiştirme.
+7. **Authorization + mutation aynı transaction içinde olmalı.** Özellikle role/üyelik/invite gibi yetkili işlemlerde (OWNER kontrolü dahil) kontrol ve yazma adımları ayrık sorgularla yapılmaz.
+8. **Concurrency kritik kurallarda DB-level garanti zorunlu.** Uygulama pre-check tek başına yeterli değildir; unique index/constraint ve transaction birlikte kullanılmalıdır.
+9. **Invite token tek-kullanımlı olmalı.** Accept akışında davet kaydı koşullu update ile atomik olarak tüketilmeli (`acceptedAt` yalnızca bir kez set edilebilmeli).
+10. **Son OWNER invarianti yarış koşuluna kapalı olmalı.** Owner sayımı ve downgrade/remove işlemi aynı kilitli transaction'da yapılır; mümkünse deterministik lock sırası kullanılır.
 
 ## ID Validation Rule
 
@@ -29,6 +33,7 @@ Bu dosya, bu repoda çalışan AI agent'lar ve geliştiriciler için kesin kural
 - Unassign gibi `null` flow varsa: `null` ve missing-field testleri zorunludur.
 - Seed'den dönen ID'ler ile endpoint çağrısı için E2E smoke doğrulaması zorunludur:
   - En az 1 test veya README example doğrulaması.
+- Concurrency'ye açık akışlarda (invite create/accept/revoke, member role/remove) transaction sınırı + DB constraint doğrulaması zorunludur.
 
 ## Teknoloji Yığını
 
