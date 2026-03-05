@@ -18,6 +18,14 @@ Bu dosya, bu repoda çalışan AI agent'lar ve geliştiriciler için kesin kural
 9. **Invite token tek-kullanımlı olmalı.** Accept akışında davet kaydı koşullu update ile atomik olarak tüketilmeli (`acceptedAt` yalnızca bir kez set edilebilmeli).
 10. **Son OWNER invarianti yarış koşuluna kapalı olmalı.** Owner sayımı ve downgrade/remove işlemi aynı kilitli transaction'da yapılır; mümkünse deterministik lock sırası kullanılır.
 
+## Operasyon Kuralları (Zorunlu)
+
+- `main`'e direkt commit yok.
+- Secret commit/log yok.
+- CUID/DTO validation kurallarını bozma.
+- Authorization + mutation atomik olmalı (transaction + DB constraint).
+- PR açıklamasında mutlaka: Özet / Nasıl Çalıştırılır / `pnpm lint` + `pnpm test` sonucu.
+
 ## ID Validation Rule
 
 - Prisma schema'daki `id` generator ile DTO validation uyumlu olmalıdır.
