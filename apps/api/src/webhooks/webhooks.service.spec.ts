@@ -307,7 +307,7 @@ describe("WebhooksService", () => {
     expect(prisma.rawWebhookEvent.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          providerMessageId: "wamid.status001",
+          providerMessageId: "status:wamid.status001:delivered",
           externalAccountId: "12345",
           organizationId: "org_1",
         }),

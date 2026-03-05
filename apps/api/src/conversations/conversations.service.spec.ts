@@ -2,6 +2,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from "@nestjs/common";
+import { OutboundQueueService } from "../outbound/outbound.queue.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { ConversationsService } from "./conversations.service";
 
@@ -12,6 +13,11 @@ describe("ConversationsService", () => {
       findFirst: jest.Mock;
       update: jest.Mock;
       findMany: jest.Mock;
+    };
+    message: {
+      create: jest.Mock;
+      findMany: jest.Mock;
+      update: jest.Mock;
     };
     membership: {
       findFirst: jest.Mock;
@@ -33,6 +39,10 @@ describe("ConversationsService", () => {
       findMany: jest.Mock;
       create: jest.Mock;
     };
+    $transaction: jest.Mock;
+  };
+  let outboundQueue: {
+    enqueue: jest.Mock;
   };
 
   beforeEach(() => {
@@ -41,6 +51,11 @@ describe("ConversationsService", () => {
         findFirst: jest.fn(),
         update: jest.fn(),
         findMany: jest.fn(),
+      },
+      message: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        update: jest.fn(),
       },
       membership: {
         findFirst: jest.fn(),
@@ -62,9 +77,103 @@ describe("ConversationsService", () => {
         findMany: jest.fn(),
         create: jest.fn(),
       },
+      $transaction: jest.fn(async (arg: unknown) => {
+        if (typeof arg === "function") {
+          return (arg as (tx: unknown) => unknown)(prisma);
+        }
+
+        return arg;
+      }),
     };
 
-    service = new ConversationsService(prisma as unknown as PrismaService);
+    outboundQueue = {
+      enqueue: jest.fn(),
+    };
+
+    service = new ConversationsService(
+      prisma as unknown as PrismaService,
+      outboundQueue as unknown as OutboundQueueService,
+    );
+  });
+
+  it("should create outbound message as QUEUED and enqueue a send job", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.message.create.mockResolvedValue({
+      id: "msg_1",
+      direction: "OUTBOUND",
+      body: "Merhaba",
+      deliveryStatus: "QUEUED",
+      createdAt: new Date("2026-03-05T10:00:00.000Z"),
+      sender: { name: "Agent" },
+      conversation: { contactName: "Ahmet Kaya" },
+    });
+    prisma.conversation.update.mockResolvedValue({});
+    outboundQueue.enqueue.mockResolvedValue(undefined);
+
+    const result = await service.createOutboundMessage(
+      "org_1",
+      "usr_1",
+      "conv_1",
+      "  Merhaba  ",
+    );
+
+    expect(prisma.message.create).toHaveBeenCalledWith({
+      data: {
+        conversationId: "conv_1",
+        direction: "OUTBOUND",
+        body: "Merhaba",
+        senderId: "usr_1",
+        deliveryStatus: "QUEUED",
+        deliveryStatusUpdatedAt: expect.any(Date),
+      },
+      select: {
+        id: true,
+        direction: true,
+        body: true,
+        deliveryStatus: true,
+        createdAt: true,
+        sender: { select: { name: true } },
+        conversation: { select: { contactName: true } },
+      },
+    });
+    expect(outboundQueue.enqueue).toHaveBeenCalledWith("msg_1");
+    expect(result).toEqual({
+      id: "msg_1",
+      direction: "OUTBOUND",
+      text: "Merhaba",
+      deliveryStatus: "QUEUED",
+      createdAt: new Date("2026-03-05T10:00:00.000Z"),
+      senderDisplay: "Agent",
+    });
+  });
+
+  it("should mark outbound message as FAILED when enqueue fails", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.message.create.mockResolvedValue({
+      id: "msg_2",
+      direction: "OUTBOUND",
+      body: "Merhaba",
+      deliveryStatus: "QUEUED",
+      createdAt: new Date("2026-03-05T10:00:00.000Z"),
+      sender: { name: "Agent" },
+      conversation: { contactName: "Ahmet Kaya" },
+    });
+    prisma.conversation.update.mockResolvedValue({});
+    outboundQueue.enqueue.mockRejectedValue(new Error("redis unavailable"));
+
+    await expect(
+      service.createOutboundMessage("org_1", "usr_1", "conv_1", "Merhaba"),
+    ).rejects.toThrow("Outbound message enqueue failed");
+
+    expect(prisma.message.update).toHaveBeenCalledWith({
+      where: { id: "msg_2" },
+      data: {
+        deliveryStatus: "FAILED",
+        deliveryStatusUpdatedAt: expect.any(Date),
+        providerError: "Outbound queue enqueue failed",
+        failedAt: expect.any(Date),
+      },
+    });
   });
 
   it("should assign conversation to a valid membership", async () => {
