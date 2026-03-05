@@ -4,36 +4,31 @@ WhatsApp + Instagram mesajlarını tek ekrandan yöneten e-ticaret SaaS uygulama
 
 ## Gereksinimler
 
-- [Node.js](https://nodejs.org/) >= 20
-- [pnpm](https://pnpm.io/) >= 9
+- [Node.js](https://nodejs.org/) 20.x
+- [pnpm](https://pnpm.io/) 9.x
 - [Docker](https://www.docker.com/) + Docker Compose
 
-## Hızlı Başlangıç
+Runtime pinning:
+- `.nvmrc`: `20`
+- `package.json#volta`: Node `20.11.1`, pnpm `9.15.0`
+
+## Hızlı Başlangıç (Tek Komut)
 
 ```bash
 # 1. Repo'yu klonla
 git clone <repo-url>
 cd unified-inbox
 
-# 2. Altyapıyı başlat (PostgreSQL + Redis)
-docker compose up -d
-
-# 3. Bağımlılıkları yükle
-pnpm install
-
-# 4. Ortam değişkenlerini ayarla
-cp apps/api/.env.example apps/api/.env
-cp apps/web/.env.example apps/web/.env
-# WhatsApp webhook verify/signature için:
-# apps/api/.env -> WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET değerlerini set et
-
-# 5. Veritabanı migration + seed
-pnpm db:migrate
-pnpm db:seed
-
-# 6. Geliştirme sunucularını başlat (web + api paralel)
-pnpm dev
+# 2. Tek komutla install + local stack + migrate + seed + dev server
+pnpm demo:local
 ```
+
+`pnpm demo:local` şunları otomatik yapar:
+1. `pnpm install`
+2. `apps/api/.env` ve `apps/web/.env` dosyalarını örnekten oluşturur (dosya yoksa)
+3. `docker compose up -d` ile PostgreSQL + Redis'i başlatır
+4. `pnpm db:migrate` + `pnpm db:seed` çalıştırır
+5. `pnpm dev` ile web + api sunucularını başlatır
 
 Uygulama adresleri:
 | Servis | URL |
@@ -45,6 +40,9 @@ Uygulama adresleri:
 ## Komutlar
 
 ```bash
+pnpm demo:local       # install + setup + web/api dev (ilk kurulum)
+pnpm setup:local      # docker compose + env + migrate + seed
+pnpm dev:local        # setup:local + web/api dev (tekrar çalıştırma)
 pnpm dev              # web + api paralel başlatır
 pnpm build            # web + api production build
 pnpm lint             # tüm workspace'lerde lint çalıştırır
@@ -242,8 +240,7 @@ pnpm dev
     -H "Content-Type: application/json" \
     -d '{"text":"Merhaba, kargo nerede?","customerDisplay":"905551112233"}'
   ```
-- Webhook event'leri varsayılan olarak işlenir; Redis erişimi yoksa inline fallback ve pending-event poller devreye girer.
-- İsteğe bağlı polling aralığı için `apps/api/.env` içinde `WEBHOOK_POLL_INTERVAL_MS` ayarlanabilir (varsayılan: `3000`).
+- Webhook event'leri varsayılan olarak BullMQ ile işlenir; Redis yoksa yalnızca dev modunda inline fallback devreye girer.
 - `NEXT_PUBLIC_*` değişkenleri build-time inline edilir; bu flag build sırasında set edilmelidir.
 - Prod build'lerde `NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS` set etmeyin (veya `false` bırakın), UI görünmez.
 - Tek organization üyeliğinde login sonrası otomatik org seçilir; çoklu üyelikte UI org seçimi ister.
@@ -256,12 +253,19 @@ pnpm dev
 ├── apps/
 │   ├── web/          # Next.js 15 (App Router) + Tailwind CSS
 │   └── api/          # NestJS + Prisma + PostgreSQL
-├── packages/         # Paylaşılan tipler ve yardımcı kütüphaneler
 ├── docker-compose.yml
 ├── pnpm-workspace.yaml
+├── docs/             # Status, roadmap, architecture, setup
 ├── AGENTS.md         # AI agent kuralları
 └── PRD.md            # Ürün gereksinimleri
 ```
+
+## Dokümantasyon
+
+- [docs/STATUS.md](docs/STATUS.md)
+- [docs/ROADMAP.md](docs/ROADMAP.md)
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- [docs/DEVSETUP.md](docs/DEVSETUP.md)
 
 ## CI
 
