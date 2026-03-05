@@ -40,6 +40,16 @@ Incoming webhooks are persisted to the database first, then enqueued to a BullMQ
 |---|---|---|
 | `REDIS_URL` | **Yes** (prod) | Redis connection string for BullMQ |
 | `ENABLE_DEV_ENDPOINTS` | No | When `true` and `REDIS_URL` is unset, webhooks are processed inline (dev only) |
+| `WHATSAPP_VERIFY_TOKEN` | **Yes** (for verify endpoint) | Expected value for `GET /webhooks/whatsapp` (`hub.verify_token`) |
+| `WHATSAPP_APP_SECRET` | **Yes** (prod/staging) | HMAC secret for `X-Hub-Signature-256` verification on `POST /webhooks/whatsapp` |
+
+### WhatsApp webhook security
+
+- `GET /webhooks/whatsapp` expects `hub.mode`, `hub.verify_token`, `hub.challenge`.
+- Verification succeeds only when `hub.mode=subscribe` and `hub.verify_token === WHATSAPP_VERIFY_TOKEN`; otherwise API returns `403`.
+- `POST /webhooks/whatsapp` verifies `X-Hub-Signature-256` against raw request body using HMAC SHA-256 and `WHATSAPP_APP_SECRET`.
+- Signature bypass is allowed only when `ENABLE_DEV_ENDPOINTS=true` and `NODE_ENV!=production`.
+- `X-ORG-ID` fallback for unmapped WhatsApp accounts is also allowed only when `ENABLE_DEV_ENDPOINTS=true` and `NODE_ENV!=production`.
 
 ### Worker
 
