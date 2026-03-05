@@ -4,7 +4,7 @@ NestJS API server for the unified inbox platform.
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 20.x
 - PostgreSQL 16
 - Redis 7 (required in production; optional in dev with `ENABLE_DEV_ENDPOINTS=true`)
 
@@ -23,6 +23,13 @@ pnpm --filter api db:migrate
 cp apps/api/.env.example apps/api/.env
 pnpm --filter api dev
 ```
+
+> Runtime notu: workspace script'leri Node.js `20.x` ve pnpm `9.x` bekler.
+
+## Prisma config
+
+- Bu repoda Prisma seed komutu `apps/api/prisma.config.ts` içindeki `migrations.seed` alanından okunur.
+- `package.json#prisma` kullanımı deprecated olduğu için kullanılmaz.
 
 ## Webhook queue (BullMQ)
 

@@ -2,12 +2,18 @@
   "name": "web",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": "20.x",
+    "pnpm": "9.x"
+  },
   "scripts": {
-    "dev": "next dev -p 3000",
-    "build": "next build",
-    "start": "next start -p 3000",
-    "lint": "next lint",
-    "test": "echo \"No web tests yet\" && exit 0"
+    "check:runtime": "node ../../scripts/check-runtime.mjs",
+    "dev": "pnpm check:runtime && next dev -p 3000",
+    "build": "pnpm check:runtime && next build",
+    "start": "pnpm check:runtime && next start -p 3000",
+    "lint": "pnpm check:runtime && next lint",
+    "typecheck": "pnpm check:runtime && tsc --noEmit",
+    "test": "pnpm run typecheck"
   },
   "dependencies": {
     "next": "15.2.1",
