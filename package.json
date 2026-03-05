@@ -9,6 +9,9 @@
   },
   "scripts": {
     "check:runtime": "node ./scripts/check-runtime.mjs",
+    "setup:local": "pnpm check:runtime && ./scripts/setup-local.sh",
+    "demo:local": "pnpm check:runtime && ./scripts/demo-local.sh",
+    "dev:local": "pnpm setup:local && pnpm dev",
     "dev": "pnpm check:runtime && concurrently --kill-others-on-fail \"pnpm --filter web dev\" \"pnpm --filter api dev\"",
     "lint": "pnpm check:runtime && pnpm --filter web lint && pnpm --filter api lint",
     "test": "pnpm check:runtime && pnpm --filter web test && pnpm --filter api test",
@@ -17,6 +20,10 @@
     "db:migrate": "pnpm check:runtime && pnpm --filter api exec prisma migrate dev",
     "db:seed": "pnpm check:runtime && pnpm --filter api exec prisma db seed",
     "db:reset": "pnpm check:runtime && pnpm --filter api exec prisma migrate reset --force"
+  },
+  "volta": {
+    "node": "20.11.1",
+    "pnpm": "9.15.0"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
