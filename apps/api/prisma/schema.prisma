@@ -143,19 +143,36 @@ enum MessageDirection {
   OUTBOUND
 }
 
+enum OutboundMessageDeliveryStatus {
+  QUEUED
+  SENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
 model Message {
-  id                String           @id @default(cuid())
-  direction         MessageDirection
-  body              String
-  providerMessageId String?          @unique
-  conversationId    String
-  senderId          String?
-  createdAt         DateTime         @default(now())
+  id                      String                         @id @default(cuid())
+  direction               MessageDirection
+  body                    String
+  providerMessageId       String?                        @unique
+  deliveryStatus          OutboundMessageDeliveryStatus?
+  deliveryStatusUpdatedAt DateTime?
+  providerError           String?
+  sentAt                  DateTime?
+  deliveredAt             DateTime?
+  readAt                  DateTime?
+  failedAt                DateTime?
+  conversationId          String
+  senderId                String?
+  createdAt               DateTime                       @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender       User?        @relation(fields: [senderId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
+  @@index([direction, deliveryStatus, createdAt(sort: Desc)])
   @@map("messages")
 }
 

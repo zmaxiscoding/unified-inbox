@@ -1,3 +1,5 @@
+import { OutboundMessageDeliveryStatus } from "@prisma/client";
+
 type PlainObject = Record<string, unknown>;
 
 export type NormalizedWhatsAppTextMessage = {
@@ -6,6 +8,13 @@ export type NormalizedWhatsAppTextMessage = {
   text: string;
   externalThreadId: string;
   customerDisplay: string;
+};
+
+export type NormalizedWhatsAppStatusUpdate = {
+  providerMessageId: string;
+  deliveryStatus: OutboundMessageDeliveryStatus;
+  failedReason: string | null;
+  occurredAt: Date | null;
 };
 
 function isPlainObject(value: unknown): value is PlainObject {
@@ -129,11 +138,101 @@ export function extractWhatsAppProviderMessageId(payload: unknown): string | nul
       }
 
       const providerMessageId = readNonEmptyString(status.id);
-      if (providerMessageId) {
-        return providerMessageId;
+      if (!providerMessageId) {
+        continue;
       }
+
+      const statusValue = readNonEmptyString(status.status);
+      if (!statusValue) {
+        return `status:${providerMessageId}`;
+      }
+
+      return `status:${providerMessageId}:${statusValue.toLowerCase()}`;
     }
   }
 
   return null;
+}
+
+export function extractWhatsAppStatusUpdates(
+  payload: unknown,
+): NormalizedWhatsAppStatusUpdate[] {
+  const values = getChangeValues(payload);
+  const statusUpdates: NormalizedWhatsAppStatusUpdate[] = [];
+
+  for (const value of values) {
+    const statuses = Array.isArray(value.statuses) ? value.statuses : [];
+    for (const status of statuses) {
+      if (!isPlainObject(status)) {
+        continue;
+      }
+
+      const providerMessageId = readNonEmptyString(status.id);
+      const deliveryStatus = toOutboundDeliveryStatus(status.status);
+      if (!providerMessageId || !deliveryStatus) {
+        continue;
+      }
+
+      statusUpdates.push({
+        providerMessageId,
+        deliveryStatus,
+        failedReason:
+          deliveryStatus === OutboundMessageDeliveryStatus.FAILED
+            ? extractFailedReason(status)
+            : null,
+        occurredAt: parseStatusTimestamp(status.timestamp),
+      });
+    }
+  }
+
+  return statusUpdates;
+}
+
+function toOutboundDeliveryStatus(
+  status: unknown,
+): OutboundMessageDeliveryStatus | null {
+  const normalizedStatus = readNonEmptyString(status)?.toLowerCase();
+  switch (normalizedStatus) {
+    case "sent":
+      return OutboundMessageDeliveryStatus.SENT;
+    case "delivered":
+      return OutboundMessageDeliveryStatus.DELIVERED;
+    case "read":
+      return OutboundMessageDeliveryStatus.READ;
+    case "failed":
+      return OutboundMessageDeliveryStatus.FAILED;
+    default:
+      return null;
+  }
+}
+
+function extractFailedReason(status: PlainObject): string | null {
+  const errors = Array.isArray(status.errors) ? status.errors : [];
+  for (const error of errors) {
+    if (!isPlainObject(error)) {
+      continue;
+    }
+
+    const providerMessage = readNonEmptyString(error.message);
+    if (providerMessage) {
+      return providerMessage;
+    }
+  }
+
+  return null;
+}
+
+function parseStatusTimestamp(value: unknown): Date | null {
+  const rawValue = readNonEmptyString(value);
+  if (!rawValue) {
+    return null;
+  }
+
+  const seconds = Number(rawValue);
+  if (!Number.isFinite(seconds)) {
+    return null;
+  }
+
+  const date = new Date(Math.trunc(seconds) * 1000);
+  return Number.isNaN(date.getTime()) ? null : date;
 }

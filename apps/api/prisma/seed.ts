@@ -1,4 +1,11 @@
-import { PrismaClient, Role, ChannelType, ConversationStatus, MessageDirection } from "@prisma/client";
+import {
+  PrismaClient,
+  Role,
+  ChannelType,
+  ConversationStatus,
+  MessageDirection,
+  OutboundMessageDeliveryStatus,
+} from "@prisma/client";
 import { createHash, randomBytes } from "node:crypto";
 
 const prisma = new PrismaClient();
@@ -72,6 +79,9 @@ async function main() {
         direction: MessageDirection.OUTBOUND,
         body: "Merhaba Mehmet Bey, siparişiniz hazırlanıyor.",
         providerMessageId: "wa_msg_002",
+        deliveryStatus: OutboundMessageDeliveryStatus.SENT,
+        deliveryStatusUpdatedAt: new Date(),
+        sentAt: new Date(),
         conversationId: conv1.id,
         senderId: agent.id,
       },

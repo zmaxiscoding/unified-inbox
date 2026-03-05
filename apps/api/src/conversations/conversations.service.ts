@@ -1,15 +1,18 @@
 import {
   BadRequestException,
   Injectable,
+  InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
-import { MessageDirection } from "@prisma/client";
+import { MessageDirection, OutboundMessageDeliveryStatus } from "@prisma/client";
+import { OutboundQueueService } from "../outbound/outbound.queue.service";
 import { PrismaService } from "../prisma/prisma.service";
 
 type MessageWithRelations = {
   id: string;
   direction: MessageDirection;
   body: string;
+  deliveryStatus: OutboundMessageDeliveryStatus | null;
   createdAt: Date;
   sender: { name: string } | null;
   conversation: { contactName: string };
@@ -33,7 +36,10 @@ type ConversationListItem = {
 
 @Injectable()
 export class ConversationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly outboundQueue: OutboundQueueService,
+  ) {}
 
   async listConversations(organizationId: string) {
     const conversations = await this.prisma.conversation.findMany({
@@ -117,6 +123,7 @@ export class ConversationsService {
         id: true,
         direction: true,
         body: true,
+        deliveryStatus: true,
         createdAt: true,
         sender: { select: { name: true } },
         conversation: { select: { contactName: true } },
@@ -134,35 +141,69 @@ export class ConversationsService {
     conversationId: string,
     text: string,
   ) {
-    const conversation = await this.getConversationInOrganization(
-      organizationId,
-      conversationId,
-    );
-    const message = await this.prisma.message.create({
-      data: {
-        conversationId: conversation.id,
-        direction: MessageDirection.OUTBOUND,
-        body: text,
-        senderId: userId,
-      },
-      select: {
-        id: true,
-        direction: true,
-        body: true,
-        createdAt: true,
-        sender: { select: { name: true } },
-        conversation: { select: { contactName: true } },
-      },
+    const normalizedText = text.trim();
+
+    const message = await this.prisma.$transaction(async (tx) => {
+      const conversation = await tx.conversation.findFirst({
+        where: {
+          id: conversationId,
+          organizationId,
+        },
+        select: { id: true },
+      });
+
+      if (!conversation) {
+        throw new NotFoundException("Conversation not found");
+      }
+
+      const createdMessage = await tx.message.create({
+        data: {
+          conversationId: conversation.id,
+          direction: MessageDirection.OUTBOUND,
+          body: normalizedText,
+          senderId: userId,
+          deliveryStatus: OutboundMessageDeliveryStatus.QUEUED,
+          deliveryStatusUpdatedAt: new Date(),
+        },
+        select: {
+          id: true,
+          direction: true,
+          body: true,
+          deliveryStatus: true,
+          createdAt: true,
+          sender: { select: { name: true } },
+          conversation: { select: { contactName: true } },
+        },
+      });
+
+      await tx.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          lastMessageAt: createdMessage.createdAt,
+          lastMessageText: normalizedText,
+          isUnread: false,
+        },
+      });
+
+      return createdMessage;
     });
 
-    await this.prisma.conversation.update({
-      where: { id: conversation.id },
-      data: {
-        lastMessageAt: message.createdAt,
-        lastMessageText: text,
-        isUnread: false,
-      },
-    });
+    try {
+      await this.outboundQueue.enqueue(message.id);
+    } catch {
+      const failedAt = new Date();
+      await this.prisma.message.update({
+        where: { id: message.id },
+        data: {
+          deliveryStatus: OutboundMessageDeliveryStatus.FAILED,
+          deliveryStatusUpdatedAt: failedAt,
+          providerError: "Outbound queue enqueue failed",
+          failedAt,
+        },
+      });
+
+      throw new InternalServerErrorException("Outbound message enqueue failed");
+    }
 
     return this.toMessageResponse(message);
   }
@@ -435,6 +476,7 @@ export class ConversationsService {
       id: message.id,
       direction: message.direction,
       text: message.body,
+      deliveryStatus: message.deliveryStatus,
       createdAt: message.createdAt,
       senderDisplay:
         message.direction === MessageDirection.INBOUND
