@@ -7,6 +7,7 @@ import { TeamModule } from "./team/team.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { ChannelsModule } from "./channels/channels.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
+import { DevModule } from "./dev/dev.module";
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     TeamModule,
     ChannelsModule,
     WebhooksModule,
+    DevModule,
   ],
 })
 export class AppModule {}

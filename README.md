@@ -230,6 +230,12 @@ pnpm dev
 - Demo simulate inbound kutusunu açmak için `apps/web/.env` içine `NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS=true` ekleyin.
 - `/webhooks/whatsapp` için signature bypass yalnızca `ENABLE_DEV_ENDPOINTS=true` ve `NODE_ENV!=production` iken aktiftir.
 - API tarafında `/webhooks/whatsapp` için `X-ORG-ID` fallback yalnızca `ENABLE_DEV_ENDPOINTS=true` ve `NODE_ENV!=production` iken aktiftir.
+- `POST /dev/simulate-inbound` endpoint'i `ENABLE_DEV_ENDPOINTS=true` ve `NODE_ENV!=production` iken aktiftir; auth gerektirir. Web UI'daki "Simulate Inbound" kutusu bu endpoint'i kullanır. Örnek:
+  ```bash
+  curl -b cookie.txt -X POST http://localhost:3001/dev/simulate-inbound \
+    -H "Content-Type: application/json" \
+    -d '{"text":"Merhaba, kargo nerede?","customerDisplay":"905551112233"}'
+  ```
 - Webhook event'leri varsayılan olarak işlenir; Redis erişimi yoksa inline fallback ve pending-event poller devreye girer.
 - İsteğe bağlı polling aralığı için `apps/api/.env` içinde `WEBHOOK_POLL_INTERVAL_MS` ayarlanabilir (varsayılan: `3000`).
 - `NEXT_PUBLIC_*` değişkenleri build-time inline edilir; bu flag build sırasında set edilmelidir.
