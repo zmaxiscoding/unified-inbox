@@ -1,46 +1,36 @@
 # STATUS
 
-Updated: 2026-03-05 (UTC)
+Updated: 2026-03-07 (UTC)
 Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 
 ## Current Snapshot
 
-- Git branch: `feat/audit-log-ui`
-- Working tree: clean
-- Last verified commit on branch: `8151f6b`
 - Monorepo shape: `apps/api` (NestJS + Prisma), `apps/web` (Next.js), `docker-compose.yml` (Postgres + Redis)
-- `docs/` directory was missing; created now as project control plane.
+- Runtime: Node `20.x` enforced via `.nvmrc` + `package.json#volta`; `engine-strict=true`
 
 ## What Works (Command-Verified)
 
 - Docker compose config is valid: `docker compose config`
 - Local infra comes up: `docker compose up -d` (`postgres` + `redis` running)
-- DB schema is up to date: `pnpm db:migrate` (with Node override in this environment)
-- Seed runs and provides demo data: `pnpm db:seed` (1 org, 2 users, conversations, tags, notes, invites)
-- Lint passes: `pnpm lint` (with Node override in this environment)
-- Tests pass: `pnpm test` -> 23 suites, 155 tests passed
+- DB schema is up to date: `pnpm db:migrate`
+- Seed runs and provides demo data: `pnpm db:seed` (1 org, 2 users, conversations, tags, notes, invites, audit logs)
+- Lint passes: `pnpm lint`
+- Tests pass: `pnpm test` -> 23 suites, 157 tests passed
 - Build passes: `pnpm build` (web + api)
-- Webhook pipeline is implemented as `persist -> queue -> worker`:
+- One-command bootstrap: `pnpm demo:local` reaches `install -> setup -> migrate -> seed -> dev` successfully
+- API health endpoint: `GET /health` returns `{"status":"ok",...}` from built output
+- Webhook pipeline implemented as `persist -> queue -> worker`:
   - `RawWebhookEvent` persisted in DB
   - BullMQ queue enqueue
   - Worker writes conversation/message and updates statuses
 
 ## What Is Broken or Missing
 
-1. Runtime mismatch on this machine:
-   - Repo requires Node `20.x`, machine has Node `24.11.1`.
-   - `engine-strict=true` blocks plain `pnpm` commands.
-2. Suggested debug command `docker compose build base --progress=plain` is invalid here:
-   - There is no `base` service and no Dockerfile stack in repo.
-   - Repo is Node/Nest/Next only; no Ruby/Bundler/`devise_token_auth` footprint.
-3. MVP feature gaps remain:
+1. MVP feature gaps remain:
    - Realtime push (WS/SSE) yok; UI manual refresh patterninde.
    - Inbox filtre/search/snooze/resolved-reopen akışları henüz yok.
    - Instagram outbound gönderim yok (WhatsApp outbound var).
-4. Reproducibility was multi-step and scattered in README; now consolidated with `pnpm demo:local`.
-5. Runtime standardization added:
-   - `.nvmrc` (`20`)
-   - `package.json#volta` (Node `20.11.1`, pnpm `9.15.0`)
+2. Real provider end-to-end verification (WhatsApp/Instagram live send/receive) requires paid/external credentials.
 
 ## MVP Checklist
 
@@ -55,16 +45,17 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 | 7 | Outbound queue + delivery status tracking | Partial | WhatsApp send + status webhook var, Instagram outbound yok |
 | 8 | Channel connect settings | Partial | WhatsApp connect UI/API complete, Instagram connect UI eksik |
 | 9 | Auditability (audit log API + owner UI) | Done | Cursor pagination + filters + owner-only access var |
-|10 | Reproducible local demo | Partial | `pnpm demo:local` eklendi; Node20 zorunluluğu net ama hala environment-sensitive |
+|10 | Reproducible local demo | Done | `pnpm demo:local` + Node 20 enforcement; API start entrypoint fixed |
 
 ## MVP Progress
 
-Estimated MVP progress: **70%**
+Estimated MVP progress: **75%**
 
 Rationale:
 - Core backend domain and ingestion pipeline are in place.
 - Team ops and auditability foundations are strong.
-- Biggest remaining value gaps are inbox UX depth (filter/search/status flow), realtime updates, and full provider parity.
+- Bootstrap reproducibility is now solid (runtime checks, correct start entrypoint, one-command demo).
+- Biggest remaining value gaps are inbox UX depth (filter/search/status flow) and realtime updates.
 
 ## Single Roadmap + Todo System
 
