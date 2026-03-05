@@ -8,6 +8,7 @@ import { PrismaModule } from "./prisma/prisma.module";
 import { ChannelsModule } from "./channels/channels.module";
 import { WebhooksModule } from "./webhooks/webhooks.module";
 import { DevModule } from "./dev/dev.module";
+import { AuditLogsModule } from "./audit-logs/audit-logs.module";
 
 @Module({
   imports: [
@@ -20,6 +21,7 @@ import { DevModule } from "./dev/dev.module";
     ConversationsModule,
     TeamModule,
     ChannelsModule,
+    AuditLogsModule,
     WebhooksModule,
     DevModule,
   ],

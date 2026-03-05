@@ -253,14 +253,21 @@ export default function TeamSettingsPage() {
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="border-b border-slate-200 bg-white px-6 py-4">
-        <div className="mx-auto flex w-full max-w-5xl items-center justify-between">
+        <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-semibold text-slate-900">Team Settings</h1>
             <p className="text-xs text-slate-500">
               {session.organization.name} • {session.user.name}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => router.push("/settings/audit-log")}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Audit Log
+            </button>
             <button
               type="button"
               onClick={() => router.push("/settings/channels")}
