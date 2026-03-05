@@ -24,6 +24,8 @@ pnpm install
 # 4. Ortam değişkenlerini ayarla
 cp apps/api/.env.example apps/api/.env
 cp apps/web/.env.example apps/web/.env
+# WhatsApp webhook verify/signature için:
+# apps/api/.env -> WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET değerlerini set et
 
 # 5. Veritabanı migration + seed
 pnpm db:migrate
@@ -149,55 +151,69 @@ curl -b cookie.txt -X POST http://localhost:3001/channels/whatsapp/connect \
     "wabaId":"1029384756"
   }'
 
+# WhatsApp webhook verify endpoint (Meta setup)
+curl -G "http://localhost:3001/webhooks/whatsapp" \
+  --data-urlencode "hub.mode=subscribe" \
+  --data-urlencode "hub.verify_token=${WHATSAPP_VERIFY_TOKEN}" \
+  --data-urlencode "hub.challenge=123456"
+
+# WhatsApp webhook payload + signature (prod/staging'de zorunlu)
+PAYLOAD='{
+  "entry":[
+    {
+      "changes":[
+        {
+          "value":{
+            "metadata":{"phone_number_id":"123456789012345"},
+            "messages":[
+              {
+                "id":"wamid.HBgMNTU1MTIzNDU2",
+                "from":"905551234567",
+                "type":"text",
+                "text":{"body":"Merhaba, kargo durumum nedir?"}
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}'
+SIGNATURE="sha256=$(printf '%s' \"$PAYLOAD\" | openssl dgst -sha256 -hmac \"$WHATSAPP_APP_SECRET\" | sed 's/^.* //')"
+
 # WhatsApp webhook (mapped phone_number_id -> 200 OK)
 curl -i -X POST http://localhost:3001/webhooks/whatsapp \
   -H "Content-Type: application/json" \
-  -d '{
-    "entry":[
-      {
-        "changes":[
-          {
-            "value":{
-              "metadata":{"phone_number_id":"123456789012345"},
-              "messages":[
-                {
-                  "id":"wamid.HBgMNTU1MTIzNDU2",
-                  "from":"905551234567",
-                  "type":"text",
-                  "text":{"body":"Merhaba, kargo durumum nedir?"}
-                }
-              ]
-            }
-          }
-        ]
-      }
-    ]
-  }'
+  -H "X-Hub-Signature-256: ${SIGNATURE}" \
+  -d "$PAYLOAD"
 
 # Unmapped phone_number_id -> 400 (queue'ya alınmaz)
+UNMAPPED_PAYLOAD='{
+  "entry":[
+    {
+      "changes":[
+        {
+          "value":{
+            "metadata":{"phone_number_id":"unmapped-phone-id"},
+            "messages":[
+              {
+                "id":"wamid.unmapped",
+                "from":"905551234567",
+                "type":"text",
+                "text":{"body":"Test"}
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}'
+UNMAPPED_SIGNATURE="sha256=$(printf '%s' \"$UNMAPPED_PAYLOAD\" | openssl dgst -sha256 -hmac \"$WHATSAPP_APP_SECRET\" | sed 's/^.* //')"
 curl -i -X POST http://localhost:3001/webhooks/whatsapp \
   -H "Content-Type: application/json" \
-  -d '{
-    "entry":[
-      {
-        "changes":[
-          {
-            "value":{
-              "metadata":{"phone_number_id":"unmapped-phone-id"},
-              "messages":[
-                {
-                  "id":"wamid.unmapped",
-                  "from":"905551234567",
-                  "type":"text",
-                  "text":{"body":"Test"}
-                }
-              ]
-            }
-          }
-        ]
-      }
-    ]
-  }'
+  -H "X-Hub-Signature-256: ${UNMAPPED_SIGNATURE}" \
+  -d "$UNMAPPED_PAYLOAD"
 ```
 
 ## UI Nasıl Çalıştırılır
@@ -212,7 +228,8 @@ pnpm dev
 - Channel settings: `http://localhost:3000/settings/channels`
 - API proxy: web tarafı `/api/*` isteklerini `NEXT_PUBLIC_API_URL` (varsayılan `http://localhost:3001`) adresine yönlendirir.
 - Demo simulate inbound kutusunu açmak için `apps/web/.env` içine `NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS=true` ekleyin.
-- API tarafında `/webhooks/whatsapp` için `X-ORG-ID` fallback yalnızca `apps/api/.env` içinde `ENABLE_DEV_ENDPOINTS=true` iken aktiftir.
+- `/webhooks/whatsapp` için signature bypass yalnızca `ENABLE_DEV_ENDPOINTS=true` ve `NODE_ENV!=production` iken aktiftir.
+- API tarafında `/webhooks/whatsapp` için `X-ORG-ID` fallback yalnızca `ENABLE_DEV_ENDPOINTS=true` ve `NODE_ENV!=production` iken aktiftir.
 - Webhook event'leri varsayılan olarak işlenir; Redis erişimi yoksa inline fallback ve pending-event poller devreye girer.
 - İsteğe bağlı polling aralığı için `apps/api/.env` içinde `WEBHOOK_POLL_INTERVAL_MS` ayarlanabilir (varsayılan: `3000`).
 - `NEXT_PUBLIC_*` değişkenleri build-time inline edilir; bu flag build sırasında set edilmelidir.

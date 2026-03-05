@@ -1,5 +1,6 @@
+import { BadRequestException, ForbiddenException } from "@nestjs/common";
 import { WebhookProcessingStatus } from "@prisma/client";
-import { BadRequestException } from "@nestjs/common";
+import { createHmac } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { WebhooksQueueService } from "./webhooks.queue.service";
 import { WebhooksService } from "./webhooks.service";
@@ -52,7 +53,31 @@ const WHATSAPP_STATUS_PAYLOAD = {
   ],
 };
 
+function createSignedWebhookOptions(
+  payload: unknown,
+  overrides: {
+    secret?: string;
+    signatureHeader?: string;
+    xOrgIdHeader?: string;
+    rawBody?: Buffer;
+  } = {},
+) {
+  const rawBody = overrides.rawBody ?? Buffer.from(JSON.stringify(payload));
+  const secret = overrides.secret ?? process.env.WHATSAPP_APP_SECRET ?? "";
+  const signatureHeader =
+    overrides.signatureHeader ??
+    `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`;
+
+  return {
+    xOrgIdHeader: overrides.xOrgIdHeader,
+    signatureHeader,
+    rawBody,
+  };
+}
+
 describe("WebhooksService", () => {
+  const previousEnv = process.env;
+
   let service: WebhooksService;
   let prisma: {
     channelAccount: {
@@ -71,6 +96,10 @@ describe("WebhooksService", () => {
   };
 
   beforeEach(() => {
+    process.env = { ...previousEnv };
+    process.env.NODE_ENV = "test";
+    process.env.WHATSAPP_APP_SECRET = "test-whatsapp-secret";
+    process.env.WHATSAPP_VERIFY_TOKEN = "test-verify-token";
     delete process.env.ENABLE_DEV_ENDPOINTS;
 
     prisma = {
@@ -97,24 +126,69 @@ describe("WebhooksService", () => {
   });
 
   afterEach(() => {
-    delete process.env.ENABLE_DEV_ENDPOINTS;
+    process.env = previousEnv;
+  });
+
+  it("should return challenge for valid verify token", () => {
+    const result = service.verifyWhatsAppWebhook(
+      "subscribe",
+      "test-verify-token",
+      "challenge-123",
+    );
+
+    expect(result).toBe("challenge-123");
+  });
+
+  it("should return 403 for invalid verify token", () => {
+    expect(() =>
+      service.verifyWhatsAppWebhook("subscribe", "wrong-token", "challenge-123"),
+    ).toThrow(ForbiddenException);
+  });
+
+  it("should return 403 for missing signature", async () => {
+    await expect(
+      service.handleWhatsAppWebhook(WHATSAPP_TEXT_PAYLOAD, {
+        rawBody: Buffer.from(JSON.stringify(WHATSAPP_TEXT_PAYLOAD)),
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.channelAccount.findFirst).not.toHaveBeenCalled();
+    expect(prisma.rawWebhookEvent.create).not.toHaveBeenCalled();
+  });
+
+  it("should return 403 for invalid signature", async () => {
+    await expect(
+      service.handleWhatsAppWebhook(WHATSAPP_TEXT_PAYLOAD, {
+        rawBody: Buffer.from(JSON.stringify(WHATSAPP_TEXT_PAYLOAD)),
+        signatureHeader: `sha256=${"0".repeat(64)}`,
+      }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+
+    expect(prisma.channelAccount.findFirst).not.toHaveBeenCalled();
+    expect(prisma.rawWebhookEvent.create).not.toHaveBeenCalled();
   });
 
   it("should return 400 for unmapped phone_number_id", async () => {
     prisma.channelAccount.findFirst.mockResolvedValue(null);
 
     await expect(
-      service.handleWhatsAppWebhook(WHATSAPP_TEXT_PAYLOAD),
+      service.handleWhatsAppWebhook(
+        WHATSAPP_TEXT_PAYLOAD,
+        createSignedWebhookOptions(WHATSAPP_TEXT_PAYLOAD),
+      ),
     ).rejects.toBeInstanceOf(BadRequestException);
 
     expect(prisma.rawWebhookEvent.create).not.toHaveBeenCalled();
   });
 
-  it("should create raw webhook event for mapped phone_number_id", async () => {
+  it("should create raw webhook event for mapped phone_number_id with valid signature", async () => {
     prisma.channelAccount.findFirst.mockResolvedValue({ organizationId: "org_1" });
     prisma.rawWebhookEvent.create.mockResolvedValue({ id: "rwe_1" });
 
-    const result = await service.handleWhatsAppWebhook(WHATSAPP_TEXT_PAYLOAD);
+    const result = await service.handleWhatsAppWebhook(
+      WHATSAPP_TEXT_PAYLOAD,
+      createSignedWebhookOptions(WHATSAPP_TEXT_PAYLOAD),
+    );
 
     expect(result).toEqual({ ok: true });
     expect(prisma.rawWebhookEvent.create).toHaveBeenCalledWith(
@@ -129,22 +203,36 @@ describe("WebhooksService", () => {
     expect(queue.enqueue).toHaveBeenCalledWith("rwe_1");
   });
 
-  it("should allow X-ORG-ID fallback only when ENABLE_DEV_ENDPOINTS=true", async () => {
+  it("should allow X-ORG-ID fallback only when ENABLE_DEV_ENDPOINTS=true in non-production", async () => {
     process.env.ENABLE_DEV_ENDPOINTS = "true";
     prisma.channelAccount.findFirst.mockResolvedValue(null);
     prisma.organization.findUnique.mockResolvedValue({ id: "org_dev" });
     prisma.rawWebhookEvent.create.mockResolvedValue({ id: "rwe_2" });
 
-    const result = await service.handleWhatsAppWebhook(
-      WHATSAPP_TEXT_PAYLOAD,
-      "org_dev",
-    );
+    const result = await service.handleWhatsAppWebhook(WHATSAPP_TEXT_PAYLOAD, {
+      xOrgIdHeader: "org_dev",
+    });
 
     expect(result).toEqual({ ok: true });
     expect(prisma.organization.findUnique).toHaveBeenCalledWith({
       where: { id: "org_dev" },
       select: { id: true },
     });
+  });
+
+  it("should block X-ORG-ID fallback in production even when ENABLE_DEV_ENDPOINTS=true", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.ENABLE_DEV_ENDPOINTS = "true";
+    prisma.channelAccount.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.handleWhatsAppWebhook(WHATSAPP_TEXT_PAYLOAD, {
+        ...createSignedWebhookOptions(WHATSAPP_TEXT_PAYLOAD),
+        xOrgIdHeader: "org_dev",
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.organization.findUnique).not.toHaveBeenCalled();
   });
 
   it("should no-op duplicate providerMessageId", async () => {
@@ -155,7 +243,10 @@ describe("WebhooksService", () => {
       processingStatus: WebhookProcessingStatus.PROCESSED,
     });
 
-    const result = await service.handleWhatsAppWebhook(WHATSAPP_TEXT_PAYLOAD);
+    const result = await service.handleWhatsAppWebhook(
+      WHATSAPP_TEXT_PAYLOAD,
+      createSignedWebhookOptions(WHATSAPP_TEXT_PAYLOAD),
+    );
 
     expect(result).toEqual({ ok: true, duplicate: true });
     expect(queue.enqueue).not.toHaveBeenCalled();
@@ -174,10 +265,16 @@ describe("WebhooksService", () => {
     queue.enqueue.mockResolvedValueOnce(undefined);
 
     await expect(
-      service.handleWhatsAppWebhook(WHATSAPP_TEXT_PAYLOAD),
+      service.handleWhatsAppWebhook(
+        WHATSAPP_TEXT_PAYLOAD,
+        createSignedWebhookOptions(WHATSAPP_TEXT_PAYLOAD),
+      ),
     ).rejects.toThrow("redis unavailable");
 
-    const retryResult = await service.handleWhatsAppWebhook(WHATSAPP_TEXT_PAYLOAD);
+    const retryResult = await service.handleWhatsAppWebhook(
+      WHATSAPP_TEXT_PAYLOAD,
+      createSignedWebhookOptions(WHATSAPP_TEXT_PAYLOAD),
+    );
 
     expect(retryResult).toEqual({ ok: true, duplicate: true });
     expect(prisma.rawWebhookEvent.findUnique).toHaveBeenCalledWith({
@@ -201,7 +298,10 @@ describe("WebhooksService", () => {
     prisma.channelAccount.findFirst.mockResolvedValue({ organizationId: "org_1" });
     prisma.rawWebhookEvent.create.mockResolvedValue({ id: "rwe_3" });
 
-    const result = await service.handleWhatsAppWebhook(WHATSAPP_STATUS_PAYLOAD);
+    const result = await service.handleWhatsAppWebhook(
+      WHATSAPP_STATUS_PAYLOAD,
+      createSignedWebhookOptions(WHATSAPP_STATUS_PAYLOAD),
+    );
 
     expect(result).toEqual({ ok: true });
     expect(prisma.rawWebhookEvent.create).toHaveBeenCalledWith(
