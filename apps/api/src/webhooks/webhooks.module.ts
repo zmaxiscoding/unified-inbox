@@ -9,6 +9,6 @@ import { WebhooksWorkerService } from "./webhooks.worker.service";
   imports: [PrismaModule],
   controllers: [WebhooksController],
   providers: [WebhooksService, WebhooksQueueService, WebhooksWorkerService],
-  exports: [WebhooksWorkerService],
+  exports: [WebhooksWorkerService, WebhooksQueueService],
 })
 export class WebhooksModule {}
