@@ -69,4 +69,28 @@ export class WebhooksController {
       rawBody: request?.rawBody,
     });
   }
+
+  @Get("instagram")
+  verifyInstagramWebhook(@Query() query: Record<string, unknown>) {
+    const mode = readHubQueryString(query, "hub.mode", "mode");
+    const verifyToken = readHubQueryString(query, "hub.verify_token", "verify_token");
+    const challenge = readHubQueryString(query, "hub.challenge", "challenge");
+
+    return this.webhooksService.verifyInstagramWebhook(mode, verifyToken, challenge);
+  }
+
+  @Post("instagram")
+  @HttpCode(200)
+  handleInstagramWebhook(
+    @Body() payload: unknown,
+    @Headers("x-org-id") xOrgIdHeader?: string,
+    @Headers("x-hub-signature-256") signatureHeader?: string,
+    @Req() request?: RawBodyRequest<Request>,
+  ) {
+    return this.webhooksService.handleInstagramWebhook(payload, {
+      xOrgIdHeader,
+      signatureHeader,
+      rawBody: request?.rawBody,
+    });
+  }
 }

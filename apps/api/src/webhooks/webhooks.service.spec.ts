@@ -315,4 +315,152 @@ describe("WebhooksService", () => {
     );
     expect(queue.enqueue).toHaveBeenCalledWith("rwe_3");
   });
+
+  // ─── Instagram Webhook Tests ────────────────────────────
+
+  const INSTAGRAM_TEXT_PAYLOAD = {
+    entry: [
+      {
+        id: "ig_account_123",
+        messaging: [
+          {
+            sender: { id: "ig_sender_456" },
+            recipient: { id: "ig_account_123" },
+            message: {
+              mid: "mid.instagram001",
+              text: "Hello from Instagram",
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  const INSTAGRAM_IMAGE_PAYLOAD = {
+    entry: [
+      {
+        id: "ig_account_123",
+        messaging: [
+          {
+            sender: { id: "ig_sender_456" },
+            recipient: { id: "ig_account_123" },
+            message: {
+              mid: "mid.instagram002",
+              attachments: [{ type: "image", payload: { url: "https://example.com/img.jpg" } }],
+            },
+          },
+        ],
+      },
+    ],
+  };
+
+  function createSignedInstagramOptions(
+    payload: unknown,
+    overrides: {
+      secret?: string;
+      signatureHeader?: string;
+      xOrgIdHeader?: string;
+      rawBody?: Buffer;
+    } = {},
+  ) {
+    const rawBody = overrides.rawBody ?? Buffer.from(JSON.stringify(payload));
+    const secret = overrides.secret ?? process.env.INSTAGRAM_APP_SECRET ?? "";
+    const signatureHeader =
+      overrides.signatureHeader ??
+      `sha256=${createHmac("sha256", secret).update(rawBody).digest("hex")}`;
+
+    return {
+      xOrgIdHeader: overrides.xOrgIdHeader,
+      signatureHeader,
+      rawBody,
+    };
+  }
+
+  describe("Instagram webhook verification", () => {
+    beforeEach(() => {
+      process.env.INSTAGRAM_VERIFY_TOKEN = "test-ig-verify-token";
+      process.env.INSTAGRAM_APP_SECRET = "test-instagram-secret";
+    });
+
+    it("should return challenge for valid instagram verify token", () => {
+      const result = service.verifyInstagramWebhook(
+        "subscribe",
+        "test-ig-verify-token",
+        "ig-challenge-123",
+      );
+
+      expect(result).toBe("ig-challenge-123");
+    });
+
+    it("should return 403 for invalid instagram verify token", () => {
+      expect(() =>
+        service.verifyInstagramWebhook("subscribe", "wrong-token", "ig-challenge-123"),
+      ).toThrow(ForbiddenException);
+    });
+  });
+
+  describe("Instagram webhook handling", () => {
+    beforeEach(() => {
+      process.env.INSTAGRAM_APP_SECRET = "test-instagram-secret";
+    });
+
+    it("should return 400 for unmapped instagram account", async () => {
+      prisma.channelAccount.findFirst.mockResolvedValue(null);
+
+      await expect(
+        service.handleInstagramWebhook(
+          INSTAGRAM_TEXT_PAYLOAD,
+          createSignedInstagramOptions(INSTAGRAM_TEXT_PAYLOAD),
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+
+      expect(prisma.rawWebhookEvent.create).not.toHaveBeenCalled();
+    });
+
+    it("should create raw webhook event for mapped instagram account", async () => {
+      prisma.channelAccount.findFirst.mockResolvedValue({ organizationId: "org_1" });
+      prisma.rawWebhookEvent.create.mockResolvedValue({ id: "rwe_ig_1" });
+
+      const result = await service.handleInstagramWebhook(
+        INSTAGRAM_TEXT_PAYLOAD,
+        createSignedInstagramOptions(INSTAGRAM_TEXT_PAYLOAD),
+      );
+
+      expect(result).toEqual({ ok: true });
+      expect(prisma.rawWebhookEvent.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            provider: "INSTAGRAM",
+            organizationId: "org_1",
+            externalAccountId: "ig_account_123",
+            providerMessageId: "mid.instagram001",
+          }),
+        }),
+      );
+      expect(queue.enqueue).toHaveBeenCalledWith("rwe_ig_1");
+    });
+
+    it("should ACK non-text instagram message and enqueue for processing", async () => {
+      prisma.channelAccount.findFirst.mockResolvedValue({ organizationId: "org_1" });
+      prisma.rawWebhookEvent.create.mockResolvedValue({ id: "rwe_ig_2" });
+
+      const result = await service.handleInstagramWebhook(
+        INSTAGRAM_IMAGE_PAYLOAD,
+        createSignedInstagramOptions(INSTAGRAM_IMAGE_PAYLOAD),
+      );
+
+      expect(result).toEqual({ ok: true });
+      expect(queue.enqueue).toHaveBeenCalledWith("rwe_ig_2");
+    });
+
+    it("should return 403 for missing instagram signature", async () => {
+      await expect(
+        service.handleInstagramWebhook(INSTAGRAM_TEXT_PAYLOAD, {
+          rawBody: Buffer.from(JSON.stringify(INSTAGRAM_TEXT_PAYLOAD)),
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+
+      expect(prisma.channelAccount.findFirst).not.toHaveBeenCalled();
+    });
+  });
 });

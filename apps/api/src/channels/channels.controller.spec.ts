@@ -4,6 +4,7 @@ import { SessionPayload } from "../auth/auth.types";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
 import { ChannelsController } from "./channels.controller";
 import { ChannelsService } from "./channels.service";
+import { ConnectInstagramChannelDto } from "./dto/connect-instagram-channel.dto";
 import { ConnectWhatsAppChannelDto } from "./dto/connect-whatsapp-channel.dto";
 
 describe("ChannelsController", () => {
@@ -11,6 +12,7 @@ describe("ChannelsController", () => {
   let service: {
     listChannels: jest.Mock;
     connectWhatsAppChannel: jest.Mock;
+    connectInstagramChannel: jest.Mock;
   };
 
   const session: SessionPayload = {
@@ -25,6 +27,7 @@ describe("ChannelsController", () => {
     service = {
       listChannels: jest.fn(),
       connectWhatsAppChannel: jest.fn(),
+      connectInstagramChannel: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -114,6 +117,58 @@ describe("ChannelsController", () => {
 
     await expect(
       pipe.transform({ phoneNumberId: "12345", accessToken: "   " }, metadata),
+    ).rejects.toThrow();
+  });
+
+  it("should connect instagram via service", async () => {
+    service.connectInstagramChannel.mockResolvedValue({ id: "ca_2" });
+
+    const payload: ConnectInstagramChannelDto = {
+      instagramAccountId: "ig_12345",
+      accessToken: "token",
+      displayName: "My Brand",
+    };
+
+    const result = await controller.connectInstagramChannel(payload, session);
+
+    expect(result).toEqual({ id: "ca_2" });
+    expect(service.connectInstagramChannel).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      payload,
+    );
+  });
+
+  it("should reject instagram connect for AGENT role", async () => {
+    const payload: ConnectInstagramChannelDto = {
+      instagramAccountId: "ig_12345",
+      accessToken: "token",
+    };
+
+    expect(() =>
+      controller.connectInstagramChannel(payload, {
+        ...session,
+        role: "AGENT",
+      }),
+    ).toThrow("Only owners can connect channels");
+
+    expect(service.connectInstagramChannel).not.toHaveBeenCalled();
+  });
+
+  it("should reject blank instagramAccountId payload", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: ConnectInstagramChannelDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ instagramAccountId: "   ", accessToken: "token" }, metadata),
     ).rejects.toThrow();
   });
 });

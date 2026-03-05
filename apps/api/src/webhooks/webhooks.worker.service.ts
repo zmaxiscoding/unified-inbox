@@ -7,6 +7,7 @@ import {
   WebhookProcessingStatus,
 } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { extractInstagramTextMessage } from "./instagram-payload";
 import {
   extractWhatsAppStatusUpdates,
   extractWhatsAppTextMessage,
@@ -44,12 +45,23 @@ export class WebhooksWorkerService {
     }
 
     try {
-      if (rawEvent.provider !== ChannelType.WHATSAPP) {
+      let normalizedMessage: {
+        providerMessageId: string;
+        from: string;
+        text: string;
+        externalThreadId: string;
+        customerDisplay: string;
+      } | null = null;
+      let statusUpdates: NormalizedWhatsAppStatusUpdate[] = [];
+
+      if (rawEvent.provider === ChannelType.WHATSAPP) {
+        normalizedMessage = extractWhatsAppTextMessage(rawEvent.payload);
+        statusUpdates = extractWhatsAppStatusUpdates(rawEvent.payload);
+      } else if (rawEvent.provider === ChannelType.INSTAGRAM) {
+        normalizedMessage = extractInstagramTextMessage(rawEvent.payload);
+      } else {
         throw new Error(`Unsupported webhook provider: ${rawEvent.provider}`);
       }
-
-      const normalizedMessage = extractWhatsAppTextMessage(rawEvent.payload);
-      const statusUpdates = extractWhatsAppStatusUpdates(rawEvent.payload);
 
       if (!normalizedMessage && statusUpdates.length === 0) {
         await this.markRawEventAsProcessed(rawEvent.id);
@@ -101,17 +113,21 @@ export class WebhooksWorkerService {
       customerDisplay: string;
     },
   ) {
+    const channelName = rawEvent.provider === ChannelType.INSTAGRAM
+      ? "Instagram Business"
+      : "WhatsApp Business";
+
     const channel = await tx.channel.upsert({
       where: {
         organizationId_type_externalId: {
           organizationId: rawEvent.organizationId,
-          type: ChannelType.WHATSAPP,
+          type: rawEvent.provider,
           externalId: rawEvent.externalAccountId,
         },
       },
       create: {
-        type: ChannelType.WHATSAPP,
-        name: "WhatsApp Business",
+        type: rawEvent.provider,
+        name: channelName,
         externalId: rawEvent.externalAccountId,
         organizationId: rawEvent.organizationId,
       },

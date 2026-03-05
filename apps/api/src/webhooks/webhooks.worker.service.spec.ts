@@ -211,4 +211,115 @@ describe("WebhooksWorkerService", () => {
       },
     });
   });
+
+  // ─── Instagram Worker Tests ─────────────────────────────
+
+  const BASE_IG_RAW_EVENT = {
+    id: "rwe_ig_1",
+    provider: "INSTAGRAM",
+    externalAccountId: "ig_account_123",
+    organizationId: "org_1",
+    processingStatus: "PENDING",
+  };
+
+  it("should process instagram text message and persist inbound", async () => {
+    prisma.rawWebhookEvent.findUnique.mockResolvedValue({
+      ...BASE_IG_RAW_EVENT,
+      payload: {
+        entry: [
+          {
+            id: "ig_account_123",
+            messaging: [
+              {
+                sender: { id: "ig_sender_456" },
+                recipient: { id: "ig_account_123" },
+                message: {
+                  mid: "mid.instagram001",
+                  text: "Hello from Instagram",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    prisma.channel.upsert.mockResolvedValue({ id: "ch_ig_1" });
+    prisma.conversation.findFirst.mockResolvedValue(null);
+    prisma.conversation.create.mockResolvedValue({ id: "conv_ig_1" });
+    prisma.message.create.mockResolvedValue({ createdAt: new Date("2026-03-05T12:00:00.000Z") });
+    prisma.conversation.update.mockResolvedValue({});
+    prisma.rawWebhookEvent.update.mockResolvedValue({});
+
+    await service.processRawEvent("rwe_ig_1");
+
+    expect(prisma.channel.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          organizationId_type_externalId: {
+            organizationId: "org_1",
+            type: "INSTAGRAM",
+            externalId: "ig_account_123",
+          },
+        },
+        create: expect.objectContaining({
+          type: "INSTAGRAM",
+          name: "Instagram Business",
+        }),
+      }),
+    );
+    expect(prisma.message.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          direction: "INBOUND",
+          body: "Hello from Instagram",
+          providerMessageId: "mid.instagram001",
+        }),
+      }),
+    );
+    expect(prisma.rawWebhookEvent.update).toHaveBeenCalledWith({
+      where: { id: "rwe_ig_1" },
+      data: {
+        processingStatus: "PROCESSED",
+        processedAt: expect.any(Date),
+        error: null,
+      },
+    });
+  });
+
+  it("should mark instagram non-text message as processed (no-op)", async () => {
+    prisma.rawWebhookEvent.findUnique.mockResolvedValue({
+      ...BASE_IG_RAW_EVENT,
+      payload: {
+        entry: [
+          {
+            id: "ig_account_123",
+            messaging: [
+              {
+                sender: { id: "ig_sender_456" },
+                recipient: { id: "ig_account_123" },
+                message: {
+                  mid: "mid.instagram002",
+                  attachments: [{ type: "image", payload: { url: "https://example.com/img.jpg" } }],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    prisma.rawWebhookEvent.update.mockResolvedValue({});
+
+    await service.processRawEvent("rwe_ig_1");
+
+    expect(prisma.channel.upsert).not.toHaveBeenCalled();
+    expect(prisma.message.create).not.toHaveBeenCalled();
+    expect(prisma.rawWebhookEvent.update).toHaveBeenCalledWith({
+      where: { id: "rwe_ig_1" },
+      data: {
+        processingStatus: "PROCESSED",
+        processedAt: expect.any(Date),
+        error: null,
+      },
+    });
+  });
 });
