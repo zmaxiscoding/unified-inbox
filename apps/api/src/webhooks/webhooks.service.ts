@@ -3,12 +3,16 @@ import { ChannelType, Prisma, WebhookProcessingStatus } from "@prisma/client";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import {
+  extractInstagramAccountId,
+  extractInstagramProviderMessageId,
+} from "./instagram-payload";
+import {
   extractWhatsAppPhoneNumberId,
   extractWhatsAppProviderMessageId,
 } from "./whatsapp-payload";
 import { WebhooksQueueService } from "./webhooks.queue.service";
 
-type HandleWhatsAppWebhookOptions = {
+type HandleWebhookOptions = {
   xOrgIdHeader?: string;
   signatureHeader?: string;
   rawBody?: Buffer;
@@ -38,9 +42,9 @@ export class WebhooksService {
 
   async handleWhatsAppWebhook(
     payload: unknown,
-    options: HandleWhatsAppWebhookOptions = {},
+    options: HandleWebhookOptions = {},
   ) {
-    this.assertValidWhatsAppSignature(options.signatureHeader, options.rawBody);
+    this.assertValidSignature(options.signatureHeader, options.rawBody, "WHATSAPP_APP_SECRET", "WhatsApp");
 
     const phoneNumberId = extractWhatsAppPhoneNumberId(payload);
     if (!phoneNumberId) {
@@ -52,6 +56,7 @@ export class WebhooksService {
       this.createFallbackProviderMessageId(payload);
 
     const organizationId = await this.resolveOrganizationId(
+      ChannelType.WHATSAPP,
       phoneNumberId,
       options.xOrgIdHeader,
     );
@@ -105,14 +110,76 @@ export class WebhooksService {
     await this.queue.enqueue(existingEvent.id);
   }
 
+  verifyInstagramWebhook(mode?: string, verifyToken?: string, challenge?: string) {
+    const expectedVerifyToken = process.env.INSTAGRAM_VERIFY_TOKEN?.trim();
+
+    if (
+      mode !== "subscribe" ||
+      !challenge ||
+      !expectedVerifyToken ||
+      verifyToken !== expectedVerifyToken
+    ) {
+      throw new ForbiddenException("Instagram webhook verification failed");
+    }
+
+    return challenge;
+  }
+
+  async handleInstagramWebhook(
+    payload: unknown,
+    options: HandleWebhookOptions = {},
+  ) {
+    this.assertValidSignature(options.signatureHeader, options.rawBody, "INSTAGRAM_APP_SECRET", "Instagram");
+
+    const instagramAccountId = extractInstagramAccountId(payload);
+    if (!instagramAccountId) {
+      throw new BadRequestException("Instagram account ID is missing in payload");
+    }
+
+    const providerMessageId =
+      extractInstagramProviderMessageId(payload) ??
+      this.createFallbackProviderMessageId(payload);
+
+    const organizationId = await this.resolveOrganizationId(
+      ChannelType.INSTAGRAM,
+      instagramAccountId,
+      options.xOrgIdHeader,
+    );
+
+    try {
+      const rawWebhookEvent = await this.prisma.rawWebhookEvent.create({
+        data: {
+          provider: ChannelType.INSTAGRAM,
+          providerMessageId,
+          externalAccountId: instagramAccountId,
+          organizationId,
+          payload: payload as Prisma.InputJsonValue,
+        },
+        select: { id: true },
+      });
+
+      await this.queue.enqueue(rawWebhookEvent.id);
+
+      return { ok: true };
+    } catch (error) {
+      if (this.isUniqueConstraintError(error)) {
+        await this.reenqueueIfPendingDuplicate(ChannelType.INSTAGRAM, providerMessageId);
+        return { ok: true, duplicate: true };
+      }
+
+      throw error;
+    }
+  }
+
   private async resolveOrganizationId(
-    phoneNumberId: string,
+    provider: ChannelType,
+    externalAccountId: string,
     xOrgIdHeader?: string,
   ) {
     const mappedAccount = await this.prisma.channelAccount.findFirst({
       where: {
-        provider: ChannelType.WHATSAPP,
-        externalAccountId: phoneNumberId,
+        provider,
+        externalAccountId,
       },
       select: { organizationId: true },
     });
@@ -134,7 +201,7 @@ export class WebhooksService {
       return organization.id;
     }
 
-    throw new BadRequestException("Unmapped WhatsApp phone_number_id");
+    throw new BadRequestException(`Unmapped ${provider} account`);
   }
 
   private isUniqueConstraintError(error: unknown) {
@@ -151,7 +218,12 @@ export class WebhooksService {
     return `payload:${hash}`;
   }
 
-  private assertValidWhatsAppSignature(signatureHeader?: string, rawBody?: Buffer) {
+  private assertValidSignature(
+    signatureHeader: string | undefined,
+    rawBody: Buffer | undefined,
+    secretEnvKey: string,
+    providerLabel: string,
+  ) {
     if (this.isDevEndpointsEnabled()) {
       return;
     }
@@ -164,9 +236,9 @@ export class WebhooksService {
       throw new ForbiddenException("Missing raw request body");
     }
 
-    const expectedSecret = process.env.WHATSAPP_APP_SECRET?.trim();
+    const expectedSecret = process.env[secretEnvKey]?.trim();
     if (!expectedSecret) {
-      throw new ForbiddenException("WhatsApp app secret is not configured");
+      throw new ForbiddenException(`${providerLabel} app secret is not configured`);
     }
 
     const providedDigest = this.parseSignatureHeader(signatureHeader);

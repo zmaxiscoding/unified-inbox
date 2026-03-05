@@ -78,4 +78,41 @@ describe("ChannelsService", () => {
       }),
     ).rejects.toBeInstanceOf(ConflictException);
   });
+
+  it("should connect instagram channel and return response without token", async () => {
+    prisma.channelAccount.create.mockResolvedValue({
+      id: "ca_2",
+      provider: "INSTAGRAM",
+      externalAccountId: "ig_12345",
+      displayPhoneNumber: "My Brand",
+      createdAt: new Date("2026-03-01T00:00:00.000Z"),
+    });
+    prisma.channel.upsert.mockResolvedValue({});
+    prisma.auditLog.create.mockResolvedValue({});
+
+    const result = await service.connectInstagramChannel("org_1", "usr_1", {
+      instagramAccountId: "ig_12345",
+      accessToken: "token",
+      displayName: "My Brand",
+    });
+
+    expect(result).toEqual({
+      id: "ca_2",
+      provider: "INSTAGRAM",
+      instagramAccountId: "ig_12345",
+      displayName: "My Brand",
+      connectedAt: new Date("2026-03-01T00:00:00.000Z"),
+    });
+  });
+
+  it("should block duplicate instagram connect", async () => {
+    prisma.channelAccount.create.mockRejectedValue({ code: "P2002" });
+
+    await expect(
+      service.connectInstagramChannel("org_1", "usr_1", {
+        instagramAccountId: "ig_12345",
+        accessToken: "token",
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
 });

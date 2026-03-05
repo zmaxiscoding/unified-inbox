@@ -5,6 +5,7 @@ import {
 } from "@nestjs/common";
 import { ChannelType } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { ConnectInstagramChannelDto } from "./dto/connect-instagram-channel.dto";
 import { ConnectWhatsAppChannelDto } from "./dto/connect-whatsapp-channel.dto";
 
 type ChannelAccountListItem = {
@@ -129,6 +130,93 @@ export class ChannelsService {
     } catch (error) {
       if (this.isUniqueConstraintError(error)) {
         throw new ConflictException("WhatsApp channel already connected");
+      }
+
+      throw error;
+    }
+  }
+
+  async connectInstagramChannel(
+    organizationId: string,
+    actorUserId: string,
+    dto: ConnectInstagramChannelDto,
+  ) {
+    const instagramAccountId = dto.instagramAccountId.trim();
+    const accessToken = dto.accessToken.trim();
+    const displayName = dto.displayName?.trim() || null;
+
+    if (!instagramAccountId || !accessToken) {
+      throw new BadRequestException("instagramAccountId and accessToken are required");
+    }
+
+    try {
+      const account = await this.prisma.$transaction(async (tx) => {
+        const createdAccount = await tx.channelAccount.create({
+          data: {
+            organizationId,
+            provider: ChannelType.INSTAGRAM,
+            externalAccountId: instagramAccountId,
+            // TODO(encrypt): persist encrypted token instead of plaintext.
+            accessToken,
+            displayPhoneNumber: displayName,
+          },
+          select: {
+            id: true,
+            provider: true,
+            externalAccountId: true,
+            displayPhoneNumber: true,
+            createdAt: true,
+          },
+        });
+
+        await tx.channel.upsert({
+          where: {
+            organizationId_type_externalId: {
+              organizationId,
+              type: ChannelType.INSTAGRAM,
+              externalId: instagramAccountId,
+            },
+          },
+          create: {
+            type: ChannelType.INSTAGRAM,
+            name: displayName
+              ? `Instagram ${displayName}`
+              : "Instagram Business",
+            externalId: instagramAccountId,
+            organizationId,
+          },
+          update: {
+            name: displayName
+              ? `Instagram ${displayName}`
+              : "Instagram Business",
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            action: "channel.connected",
+            organizationId,
+            actorId: actorUserId,
+            metadata: {
+              provider: ChannelType.INSTAGRAM,
+              externalAccountId: instagramAccountId,
+            },
+          },
+        });
+
+        return createdAccount;
+      });
+
+      return {
+        id: account.id,
+        provider: account.provider,
+        instagramAccountId: account.externalAccountId,
+        displayName: account.displayPhoneNumber,
+        connectedAt: account.createdAt,
+      };
+    } catch (error) {
+      if (this.isUniqueConstraintError(error)) {
+        throw new ConflictException("Instagram channel already connected");
       }
 
       throw error;
