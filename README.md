@@ -138,6 +138,12 @@ curl -b cookie.txt -X PATCH http://localhost:3001/memberships/<membershipId>/rol
 # Üyeyi kaldır (OWNER yetkisi gerekli)
 curl -b cookie.txt -X DELETE http://localhost:3001/memberships/<membershipId>
 
+# Audit logları listele (OWNER yetkisi gerekli, varsayılan son 90 gün)
+curl -b cookie.txt "http://localhost:3001/audit-logs?action=conversation.assigned&actorId=<userId>&from=2026-01-01T00:00:00.000Z&to=2026-03-01T00:00:00.000Z&limit=20"
+
+# Sonraki sayfayı cursor ile çek
+curl -b cookie.txt "http://localhost:3001/audit-logs?cursor=<nextCursor>&limit=20"
+
 # Bağlı kanalları listele (token dönmez)
 curl -b cookie.txt http://localhost:3001/channels
 
