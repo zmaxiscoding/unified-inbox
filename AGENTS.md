@@ -22,6 +22,7 @@ Bu dosya, bu repoda çalışan AI agent'lar ve geliştiriciler için kesin kural
 
 - `main`'e direkt commit yok.
 - Secret commit/log yok.
+- Runtime zorunluluğu: Node.js `20.x` + pnpm `9.x` (workspace scripts bu sürümü bekler).
 - CUID/DTO validation kurallarını bozma.
 - Authorization + mutation atomik olmalı (transaction + DB constraint).
 - PR açıklamasında mutlaka: Özet / Nasıl Çalıştırılır / `pnpm lint` + `pnpm test` sonucu.
@@ -38,6 +39,7 @@ Bu dosya, bu repoda çalışan AI agent'lar ve geliştiriciler için kesin kural
 ## PR Checklist
 
 - Yeni endpoint eklendiyse: request body validation + testler zorunludur.
+- Frontend değişikliği varsa en az web smoke test (`pnpm --filter web test`) geçmelidir.
 - Unassign gibi `null` flow varsa: `null` ve missing-field testleri zorunludur.
 - Seed'den dönen ID'ler ile endpoint çağrısı için E2E smoke doğrulaması zorunludur:
   - En az 1 test veya README example doğrulaması.
