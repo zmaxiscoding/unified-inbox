@@ -10,7 +10,7 @@
     "check:runtime": "node ../../scripts/check-runtime.mjs",
     "dev": "pnpm check:runtime && nest start --watch",
     "build": "pnpm check:runtime && nest build",
-    "start": "pnpm check:runtime && node dist/main",
+    "start": "pnpm check:runtime && node dist/src/main.js",
     "lint": "pnpm check:runtime && eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "pnpm check:runtime && jest",
     "test:watch": "pnpm check:runtime && jest --watch",
