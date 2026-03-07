@@ -4,7 +4,7 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
-import { MessageDirection, OutboundMessageDeliveryStatus } from "@prisma/client";
+import { ConversationStatus, MessageDirection, OutboundMessageDeliveryStatus, Prisma } from "@prisma/client";
 import { OutboundQueueService } from "../outbound/outbound.queue.service";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -21,6 +21,7 @@ type MessageWithRelations = {
 type ConversationListItem = {
   id: string;
   contactName: string;
+  status: ConversationStatus;
   lastMessageAt: Date | null;
   channel: { type: string };
   assignedMembership: {
@@ -41,13 +42,40 @@ export class ConversationsService {
     private readonly outboundQueue: OutboundQueueService,
   ) {}
 
-  async listConversations(organizationId: string) {
+  async listConversations(
+    organizationId: string,
+    filters?: { status?: ConversationStatus; search?: string; assignedTo?: string },
+  ) {
+    const where: Prisma.ConversationWhereInput = { organizationId };
+
+    if (filters?.status) {
+      where.status = filters.status;
+    }
+
+    if (filters?.search) {
+      const term = filters.search.trim();
+      if (term) {
+        where.OR = [
+          { contactName: { contains: term, mode: "insensitive" } },
+          { contactPhone: { contains: term, mode: "insensitive" } },
+          { lastMessageText: { contains: term, mode: "insensitive" } },
+        ];
+      }
+    }
+
+    if (filters?.assignedTo === "unassigned") {
+      where.assignedMembershipId = null;
+    } else if (filters?.assignedTo) {
+      where.assignedMembershipId = filters.assignedTo;
+    }
+
     const conversations = await this.prisma.conversation.findMany({
-      where: { organizationId },
+      where,
       orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
       select: {
         id: true,
         contactName: true,
+        status: true,
         lastMessageAt: true,
         channel: { select: { type: true } },
         assignedMembership: {
@@ -74,6 +102,7 @@ export class ConversationsService {
     return conversations.map((conversation: ConversationListItem) => ({
       id: conversation.id,
       customerDisplay: conversation.contactName,
+      status: conversation.status,
       lastMessageAt: conversation.lastMessageAt,
       channelProvider: conversation.channel.type,
       assignedMembership: conversation.assignedMembership
@@ -453,6 +482,51 @@ export class ConversationsService {
         },
       },
     });
+  }
+
+  async updateConversationStatus(
+    organizationId: string,
+    actorUserId: string,
+    conversationId: string,
+    newStatus: ConversationStatus,
+  ) {
+    const conversation = await this.prisma.conversation.findFirst({
+      where: { id: conversationId, organizationId },
+      select: { id: true, status: true },
+    });
+
+    if (!conversation) {
+      throw new NotFoundException("Conversation not found");
+    }
+
+    if (conversation.status === newStatus) {
+      return { id: conversation.id, status: newStatus };
+    }
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.conversation.update({
+        where: { id: conversation.id },
+        data: { status: newStatus },
+        select: { id: true, status: true },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          action: "conversation.status_changed",
+          targetId: conversation.id,
+          metadata: {
+            from: conversation.status,
+            to: newStatus,
+          },
+          organizationId,
+          actorId: actorUserId,
+        },
+      });
+
+      return result;
+    });
+
+    return { id: updated.id, status: updated.status };
   }
 
   private async getConversationInOrganization(
