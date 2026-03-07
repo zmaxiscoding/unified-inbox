@@ -128,10 +128,10 @@ export default function InboxPage() {
   const [simulateInboundMessage, setSimulateInboundMessage] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"OPEN" | "RESOLVED" | "SNOOZED" | "ALL">("OPEN");
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
 
   const activeConversationRef = useRef<string | null>(null);
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
@@ -158,8 +158,8 @@ export default function InboxPage() {
       if (statusFilter !== "ALL") {
         params.set("status", statusFilter);
       }
-      if (searchQuery.trim()) {
-        params.set("search", searchQuery.trim());
+      if (debouncedSearch.trim()) {
+        params.set("search", debouncedSearch.trim());
       }
       const qs = params.toString();
       const response = await fetch(`/api/conversations${qs ? `?${qs}` : ""}`, { cache: "no-store" });
@@ -188,7 +188,7 @@ export default function InboxPage() {
     } finally {
       setIsLoadingConversations(false);
     }
-  }, [router, statusFilter, searchQuery]);
+  }, [router, statusFilter, debouncedSearch]);
 
   const fetchMembers = useCallback(async () => {
     setIsLoadingMembers(true);
@@ -306,8 +306,20 @@ export default function InboxPage() {
 
   useEffect(() => {
     if (isCheckingSession || !session) return;
-    void Promise.all([fetchConversations(), fetchMembers()]);
-  }, [fetchConversations, fetchMembers, isCheckingSession, session]);
+    void fetchMembers();
+  }, [fetchMembers, isCheckingSession, session]);
+
+  useEffect(() => {
+    if (isCheckingSession || !session) return;
+    void fetchConversations();
+  }, [fetchConversations, isCheckingSession, session]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
   useEffect(() => {
     activeConversationRef.current = selectedConversationId;
@@ -614,16 +626,6 @@ export default function InboxPage() {
     }
   };
 
-  const handleSearchChange = (value: string) => {
-    setSearchQuery(value);
-    if (searchTimerRef.current) {
-      clearTimeout(searchTimerRef.current);
-    }
-    searchTimerRef.current = setTimeout(() => {
-      void fetchConversations();
-    }, 300);
-  };
-
   return (
     <main className="min-h-screen bg-slate-100 p-4 md:p-6">
       {ENABLE_DEV_ENDPOINTS ? (
@@ -677,7 +679,7 @@ export default function InboxPage() {
             <input
               type="text"
               value={searchQuery}
-              onChange={(event) => handleSearchChange(event.target.value)}
+              onChange={(event) => setSearchQuery(event.target.value)}
               placeholder="Kişi veya mesaj ara..."
               className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs outline-none focus:border-slate-400 focus:bg-white"
             />

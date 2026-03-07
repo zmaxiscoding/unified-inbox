@@ -503,23 +503,27 @@ export class ConversationsService {
       return { id: conversation.id, status: newStatus };
     }
 
-    const updated = await this.prisma.conversation.update({
-      where: { id: conversation.id },
-      data: { status: newStatus },
-      select: { id: true, status: true },
-    });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const result = await tx.conversation.update({
+        where: { id: conversation.id },
+        data: { status: newStatus },
+        select: { id: true, status: true },
+      });
 
-    await this.prisma.auditLog.create({
-      data: {
-        action: `conversation.status_changed`,
-        targetId: conversation.id,
-        metadata: {
-          from: conversation.status,
-          to: newStatus,
+      await tx.auditLog.create({
+        data: {
+          action: "conversation.status_changed",
+          targetId: conversation.id,
+          metadata: {
+            from: conversation.status,
+            to: newStatus,
+          },
+          organizationId,
+          actorId: actorUserId,
         },
-        organizationId,
-        actorId: actorUserId,
-      },
+      });
+
+      return result;
     });
 
     return { id: updated.id, status: updated.status };

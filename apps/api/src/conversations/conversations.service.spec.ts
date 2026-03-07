@@ -522,4 +522,145 @@ describe("ConversationsService", () => {
       service.createConversationNote("org_other", "usr_1", "conv_1", "test"),
     ).rejects.toEqual(new NotFoundException("Conversation not found"));
   });
+
+  // ── Status update tests ───────────────────────────────────
+
+  it("should update conversation status and create audit log atomically", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: "conv_1",
+      status: "OPEN",
+    });
+    prisma.conversation.update.mockResolvedValue({
+      id: "conv_1",
+      status: "RESOLVED",
+    });
+
+    const result = await service.updateConversationStatus(
+      "org_1",
+      "usr_1",
+      "conv_1",
+      "RESOLVED" as const,
+    );
+
+    expect(result).toEqual({ id: "conv_1", status: "RESOLVED" });
+    expect(prisma.$transaction).toHaveBeenCalled();
+    expect(prisma.conversation.update).toHaveBeenCalledWith({
+      where: { id: "conv_1" },
+      data: { status: "RESOLVED" },
+      select: { id: true, status: true },
+    });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        action: "conversation.status_changed",
+        targetId: "conv_1",
+        metadata: { from: "OPEN", to: "RESOLVED" },
+        organizationId: "org_1",
+        actorId: "usr_1",
+      },
+    });
+  });
+
+  it("should return current status without updating when status is unchanged", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: "conv_1",
+      status: "RESOLVED",
+    });
+
+    const result = await service.updateConversationStatus(
+      "org_1",
+      "usr_1",
+      "conv_1",
+      "RESOLVED" as const,
+    );
+
+    expect(result).toEqual({ id: "conv_1", status: "RESOLVED" });
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
+  it("should return 404 when updating status for non-existent conversation", async () => {
+    prisma.conversation.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.updateConversationStatus("org_1", "usr_1", "conv_404", "RESOLVED" as const),
+    ).rejects.toEqual(new NotFoundException("Conversation not found"));
+  });
+
+  // ── Filtered list tests ───────────────────────────────────
+
+  it("should pass status filter to findMany where clause", async () => {
+    prisma.conversation.findMany.mockResolvedValue([]);
+
+    await service.listConversations("org_1", { status: "RESOLVED" as const });
+
+    expect(prisma.conversation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org_1",
+          status: "RESOLVED",
+        }),
+      }),
+    );
+  });
+
+  it("should pass search filter as OR clause to findMany", async () => {
+    prisma.conversation.findMany.mockResolvedValue([]);
+
+    await service.listConversations("org_1", { search: "ali" });
+
+    const call = prisma.conversation.findMany.mock.calls[0][0];
+    expect(call.where.OR).toEqual([
+      { contactName: { contains: "ali", mode: "insensitive" } },
+      { contactPhone: { contains: "ali", mode: "insensitive" } },
+      { lastMessageText: { contains: "ali", mode: "insensitive" } },
+    ]);
+  });
+
+  it("should filter unassigned conversations when assignedTo is 'unassigned'", async () => {
+    prisma.conversation.findMany.mockResolvedValue([]);
+
+    await service.listConversations("org_1", { assignedTo: "unassigned" });
+
+    expect(prisma.conversation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org_1",
+          assignedMembershipId: null,
+        }),
+      }),
+    );
+  });
+
+  it("should filter by specific assignee membership id", async () => {
+    prisma.conversation.findMany.mockResolvedValue([]);
+
+    await service.listConversations("org_1", { assignedTo: "mem_1" });
+
+    expect(prisma.conversation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          organizationId: "org_1",
+          assignedMembershipId: "mem_1",
+        }),
+      }),
+    );
+  });
+
+  it("should include status field in conversation list response", async () => {
+    prisma.conversation.findMany.mockResolvedValue([
+      {
+        id: "conv_1",
+        contactName: "Ahmet Kaya",
+        status: "OPEN",
+        lastMessageAt: new Date("2026-03-01T10:00:00.000Z"),
+        channel: { type: "WHATSAPP" },
+        assignedMembership: null,
+        tags: [],
+      },
+    ]);
+
+    const result = await service.listConversations("org_1");
+
+    expect(result[0].status).toBe("OPEN");
+  });
 });
