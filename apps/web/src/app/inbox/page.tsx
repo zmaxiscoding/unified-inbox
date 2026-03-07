@@ -31,6 +31,7 @@ type Note = {
 type Conversation = {
   id: string;
   customerDisplay: string;
+  status: "OPEN" | "RESOLVED" | "SNOOZED" | string;
   lastMessageAt: string | null;
   channelProvider: "WHATSAPP" | "INSTAGRAM" | string;
   assignedMembership: AssignedMembership | null;
@@ -125,8 +126,12 @@ export default function InboxPage() {
   const [simulateText, setSimulateText] = useState("");
   const [isSimulatingInbound, setIsSimulatingInbound] = useState(false);
   const [simulateInboundMessage, setSimulateInboundMessage] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<"OPEN" | "RESOLVED" | "SNOOZED" | "ALL">("OPEN");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
 
   const activeConversationRef = useRef<string | null>(null);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const selectedConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
@@ -149,7 +154,15 @@ export default function InboxPage() {
     setErrorMessage(null);
 
     try {
-      const response = await fetch("/api/conversations", { cache: "no-store" });
+      const params = new URLSearchParams();
+      if (statusFilter !== "ALL") {
+        params.set("status", statusFilter);
+      }
+      if (searchQuery.trim()) {
+        params.set("search", searchQuery.trim());
+      }
+      const qs = params.toString();
+      const response = await fetch(`/api/conversations${qs ? `?${qs}` : ""}`, { cache: "no-store" });
       if (response.status === 401) {
         router.replace("/login");
         return;
@@ -175,7 +188,7 @@ export default function InboxPage() {
     } finally {
       setIsLoadingConversations(false);
     }
-  }, [router]);
+  }, [router, statusFilter, searchQuery]);
 
   const fetchMembers = useCallback(async () => {
     setIsLoadingMembers(true);
@@ -567,6 +580,50 @@ export default function InboxPage() {
     }
   };
 
+  const handleStatusChange = async (newStatus: "OPEN" | "RESOLVED" | "SNOOZED") => {
+    if (!selectedConversationId || !selectedConversation || isUpdatingStatus) return;
+    if (selectedConversation.status === newStatus) return;
+
+    setIsUpdatingStatus(true);
+    setErrorMessage(null);
+
+    try {
+      const response = await fetch(`/api/conversations/${selectedConversationId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Status update failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as { id: string; status: string };
+      setConversations((current) =>
+        current.map((c) => (c.id === data.id ? { ...c, status: data.status } : c)),
+      );
+      await fetchConversations();
+    } catch {
+      setErrorMessage("Durum güncellenemedi.");
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearchQuery(value);
+    if (searchTimerRef.current) {
+      clearTimeout(searchTimerRef.current);
+    }
+    searchTimerRef.current = setTimeout(() => {
+      void fetchConversations();
+    }, 300);
+  };
+
   return (
     <main className="min-h-screen bg-slate-100 p-4 md:p-6">
       {ENABLE_DEV_ENDPOINTS ? (
@@ -616,7 +673,38 @@ export default function InboxPage() {
             </p>
           </div>
 
-          <div className="h-[calc(100%-73px)] overflow-y-auto">
+          <div className="border-b border-slate-200 px-4 py-2">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(event) => handleSearchChange(event.target.value)}
+              placeholder="Kişi veya mesaj ara..."
+              className="h-8 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs outline-none focus:border-slate-400 focus:bg-white"
+            />
+          </div>
+
+          <div className="flex border-b border-slate-200">
+            {(["OPEN", "RESOLVED", "ALL"] as const).map((tab) => {
+              const label = tab === "OPEN" ? "Açık" : tab === "RESOLVED" ? "Çözüldü" : "Tümü";
+              const active = statusFilter === tab;
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setStatusFilter(tab)}
+                  className={`flex-1 py-2 text-xs font-medium transition ${
+                    active
+                      ? "border-b-2 border-slate-900 text-slate-900"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="h-[calc(100%-145px)] overflow-y-auto">
             {isLoadingConversations ? (
               <p className="px-5 py-4 text-sm text-slate-500">Yükleniyor...</p>
             ) : conversations.length === 0 ? (
@@ -653,13 +741,22 @@ export default function InboxPage() {
                         </span>
                       </div>
                     </div>
-                    <p
-                      className={`mt-1 text-xs ${
-                        selected ? "text-slate-300" : "text-slate-500"
-                      }`}
-                    >
-                      {CHANNEL_LABELS[conversation.channelProvider] ?? conversation.channelProvider}
-                    </p>
+                    <div className="mt-1 flex items-center gap-2">
+                      <p
+                        className={`text-xs ${
+                          selected ? "text-slate-300" : "text-slate-500"
+                        }`}
+                      >
+                        {CHANNEL_LABELS[conversation.channelProvider] ?? conversation.channelProvider}
+                      </p>
+                      {conversation.status === "RESOLVED" ? (
+                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                          selected ? "bg-green-800 text-green-200" : "bg-green-100 text-green-700"
+                        }`}>
+                          Çözüldü
+                        </span>
+                      ) : null}
+                    </div>
                   </button>
                 );
               })
@@ -681,6 +778,27 @@ export default function InboxPage() {
               ) : null}
             </div>
             <div className="flex items-center gap-3">
+              {selectedConversation ? (
+                selectedConversation.status === "OPEN" ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleStatusChange("RESOLVED")}
+                    disabled={isUpdatingStatus}
+                    className="h-9 rounded-lg bg-green-600 px-4 text-xs font-medium text-white hover:bg-green-500 disabled:cursor-not-allowed disabled:bg-green-300"
+                  >
+                    {isUpdatingStatus ? "..." : "Çözüldü"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleStatusChange("OPEN")}
+                    disabled={isUpdatingStatus}
+                    className="h-9 rounded-lg bg-amber-600 px-4 text-xs font-medium text-white hover:bg-amber-500 disabled:cursor-not-allowed disabled:bg-amber-300"
+                  >
+                    {isUpdatingStatus ? "..." : "Yeniden Aç"}
+                  </button>
+                )
+              ) : null}
               <label className="flex items-center gap-2 text-xs text-slate-600">
                 Atama
                 <select

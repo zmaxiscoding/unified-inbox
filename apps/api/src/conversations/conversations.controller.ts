@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
   UsePipes,
   ValidationPipe,
@@ -18,6 +19,8 @@ import { AddTagDto } from "./dto/add-tag.dto";
 import { AssignConversationDto } from "./dto/assign-conversation.dto";
 import { CreateMessageDto } from "./dto/create-message.dto";
 import { CreateNoteDto } from "./dto/create-note.dto";
+import { ListConversationsQueryDto } from "./dto/list-conversations-query.dto";
+import { UpdateStatusDto } from "./dto/update-status.dto";
 import { ConversationsService } from "./conversations.service";
 
 @Controller("conversations")
@@ -33,8 +36,19 @@ export class ConversationsController {
   }
 
   @Get()
-  getConversations(@Session() session: SessionPayload) {
-    return this.conversationsService.listConversations(session.organizationId);
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  getConversations(
+    @Session() session: SessionPayload,
+    @Query() query: ListConversationsQueryDto,
+  ) {
+    return this.conversationsService.listConversations(
+      session.organizationId,
+      {
+        status: query.status,
+        search: query.search,
+        assignedTo: query.assignedTo,
+      },
+    );
   }
 
   @Get(":id/messages")
@@ -158,6 +172,27 @@ export class ConversationsController {
       session.userId,
       id,
       body.membershipId,
+    );
+  }
+
+  @Patch(":id/status")
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  )
+  updateStatus(
+    @Param("id") id: string,
+    @Body() body: UpdateStatusDto,
+    @Session() session: SessionPayload,
+  ) {
+    return this.conversationsService.updateConversationStatus(
+      session.organizationId,
+      session.userId,
+      id,
+      body.status,
     );
   }
 }
