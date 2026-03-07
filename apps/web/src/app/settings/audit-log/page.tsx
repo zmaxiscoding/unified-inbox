@@ -8,17 +8,18 @@ type Session = { user: User; organization: { id: string; name: string } };
 
 type AuditLogItem = {
   id: string;
-  createdAt: string;
+  timestamp: string;
   action: string;
   targetId: string | null;
   metadata: Record<string, unknown> | null;
-  actor: { id: string; name: string };
+  actor: { id: string; name: string; email?: string };
 };
 
 type AuditLogsResponse = {
   items: AuditLogItem[];
-  nextCursor: string | null;
-  availableActions: string[];
+  pageInfo: {
+    nextCursor: string | null;
+  };
 };
 
 type FilterState = {
@@ -87,7 +88,6 @@ export default function AuditLogSettingsPage() {
   const [session, setSession] = useState<Session | null>(null);
   const [filters, setFilters] = useState<FilterState>(() => createDefaultFilters());
   const [logs, setLogs] = useState<AuditLogItem[]>([]);
-  const [availableActions, setAvailableActions] = useState<string[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isApplying, setIsApplying] = useState(false);
@@ -155,7 +155,6 @@ export default function AuditLogSettingsPage() {
           setIsForbidden(true);
           setLogs([]);
           setNextCursor(null);
-          setAvailableActions([]);
           return;
         }
         if (!response.ok) {
@@ -167,8 +166,7 @@ export default function AuditLogSettingsPage() {
         const data = (await response.json()) as AuditLogsResponse;
 
         setIsForbidden(false);
-        setAvailableActions(data.availableActions);
-        setNextCursor(data.nextCursor);
+        setNextCursor(data.pageInfo.nextCursor);
         setLogs((current) => (reset ? data.items : [...current, ...data.items]));
       } catch (err) {
         setError(
@@ -323,7 +321,9 @@ export default function AuditLogSettingsPage() {
                     className="mt-1 h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-slate-500"
                   >
                     <option value="">All actions</option>
-                    {availableActions.map((action) => (
+                    {[...new Set(logs.map((log) => log.action))]
+                      .sort((a, b) => a.localeCompare(b))
+                      .map((action) => (
                       <option key={action} value={action}>
                         {action}
                       </option>
@@ -397,7 +397,7 @@ export default function AuditLogSettingsPage() {
                         className="rounded-lg border border-slate-200 bg-white p-4"
                       >
                         <p className="text-xs text-slate-500">
-                          {formatDateTime(log.createdAt)}
+                          {formatDateTime(log.timestamp)}
                         </p>
                         <p className="mt-1 text-sm font-semibold text-slate-900">
                           {log.action}
@@ -431,7 +431,7 @@ export default function AuditLogSettingsPage() {
                       {logs.map((log) => (
                         <tr key={log.id} className="border-b border-slate-50 align-top last:border-0">
                           <td className="px-4 py-3 whitespace-nowrap text-slate-600">
-                            {formatDateTime(log.createdAt)}
+                            {formatDateTime(log.timestamp)}
                           </td>
                           <td className="px-4 py-3 text-slate-700">{log.actor.name}</td>
                           <td className="px-4 py-3">
