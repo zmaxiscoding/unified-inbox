@@ -19,6 +19,8 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 - Build passes: `pnpm build` (web + api)
 - One-command bootstrap: `pnpm demo:local` reaches `install -> setup -> migrate -> seed -> dev` successfully
 - API health endpoint: `GET /health` returns `{"status":"ok",...}` from built output
+- Audit log web UI route is present in build output: `/settings/audit-log`
+- Settings navigation includes Audit Log entry in Team/Channels pages
 - Webhook pipeline implemented as `persist -> queue -> worker`:
   - `RawWebhookEvent` persisted in DB
   - BullMQ queue enqueue
