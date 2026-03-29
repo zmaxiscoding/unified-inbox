@@ -15,6 +15,7 @@ import { SessionAuthGuard } from "./session-auth.guard";
 import { AuthService } from "./auth.service";
 import { BootstrapOwnerDto } from "./dto/bootstrap-owner.dto";
 import { LoginDto } from "./dto/login.dto";
+import { RecoverOwnerDto } from "./dto/recover-owner.dto";
 import { SessionService } from "./session.service";
 
 @Controller("auth")
@@ -53,6 +54,21 @@ export class AuthController {
     @Res({ passthrough: true }) res: Response,
   ) {
     const result = await this.authService.bootstrapOwner(dto);
+
+    res.setHeader("Set-Cookie", this.sessionService.createSessionCookie(result.session));
+    return {
+      user: result.user,
+      organization: result.organization,
+    };
+  }
+
+  @Post("recover-owner")
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  async recoverOwner(
+    @Body() dto: RecoverOwnerDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.recoverOwnerAccess(dto);
 
     res.setHeader("Set-Cookie", this.sessionService.createSessionCookie(result.session));
     return {

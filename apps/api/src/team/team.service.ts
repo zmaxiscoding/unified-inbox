@@ -218,6 +218,7 @@ export class TeamService {
     const currentSession = options?.currentSession;
     const name = options?.name?.trim();
     const password = options?.password;
+    let sessionMatchesInviteUser = false;
 
     const acceptResult = await this.prisma.$transaction(async (tx) => {
       const invitation = await tx.invitation.findUnique({
@@ -279,6 +280,7 @@ export class TeamService {
                 id: true,
                 name: true,
                 email: true,
+                passwordHash: true,
               },
             },
           },
@@ -295,7 +297,8 @@ export class TeamService {
           });
         }
 
-        user = authenticatedMembership.user;
+        existingUser = authenticatedMembership.user;
+        sessionMatchesInviteUser = true;
       } else {
         existingUser =
           (await tx.user.findUnique({
@@ -341,19 +344,21 @@ export class TeamService {
 
       if (!user && existingUser) {
         if (existingUser.passwordHash) {
-          if (!password) {
+          if (!password && !sessionMatchesInviteUser) {
             throw new BadRequestException({
               message: INVITE_EXISTING_USER_PASSWORD_REQUIRED_MESSAGE,
               code: INVITE_EXISTING_USER_PASSWORD_REQUIRED_CODE,
             });
           }
 
-          const passwordMatches = await bcrypt.compare(
-            password,
-            existingUser.passwordHash,
-          );
-          if (!passwordMatches) {
-            throw new UnauthorizedException("Invalid credentials");
+          if (!sessionMatchesInviteUser) {
+            const passwordMatches = await bcrypt.compare(
+              password!,
+              existingUser.passwordHash,
+            );
+            if (!passwordMatches) {
+              throw new UnauthorizedException("Invalid credentials");
+            }
           }
 
           user = {

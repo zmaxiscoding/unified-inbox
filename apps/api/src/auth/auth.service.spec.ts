@@ -1,6 +1,7 @@
 import {
   ConflictException,
   ForbiddenException,
+  NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
@@ -11,8 +12,18 @@ import { AuthService } from "./auth.service";
 describe("AuthService", () => {
   let service: AuthService;
   let prisma: {
-    user: { findUnique: jest.Mock; create: jest.Mock; count: jest.Mock };
-    membership: { findUnique: jest.Mock; create: jest.Mock; count: jest.Mock };
+    user: {
+      findUnique: jest.Mock;
+      create: jest.Mock;
+      count: jest.Mock;
+      updateMany: jest.Mock;
+    };
+    membership: {
+      findUnique: jest.Mock;
+      findFirst: jest.Mock;
+      create: jest.Mock;
+      count: jest.Mock;
+    };
     organization: { create: jest.Mock; count: jest.Mock };
     auditLog: { create: jest.Mock };
     $queryRaw: jest.Mock;
@@ -25,9 +36,11 @@ describe("AuthService", () => {
         findUnique: jest.fn(),
         create: jest.fn(),
         count: jest.fn(),
+        updateMany: jest.fn(),
       },
       membership: {
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
         create: jest.fn(),
         count: jest.fn(),
       },
@@ -257,5 +270,111 @@ describe("AuthService", () => {
         organizationName: "Acme Store",
       }),
     ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it("should recover a legacy owner when no password-backed owner exists", async () => {
+    const previousSecret = process.env.AUTH_RECOVERY_SECRET;
+    process.env.AUTH_RECOVERY_SECRET = "top-secret";
+
+    prisma.membership.findFirst.mockResolvedValue({
+      organizationId: "org_1",
+      organization: { id: "org_1", name: "Acme", slug: "acme" },
+      user: {
+        id: "u1",
+        email: "owner@acme.com",
+        name: "Owner",
+        passwordHash: null,
+      },
+    });
+    prisma.membership.count.mockResolvedValue(0);
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
+    prisma.auditLog.create.mockResolvedValue({});
+
+    const result = await service.recoverOwnerAccess({
+      organizationSlug: "acme",
+      email: "owner@acme.com",
+      password: "OwnerPass123!",
+      recoverySecret: "top-secret",
+    });
+
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "u1",
+        passwordHash: null,
+      },
+      data: {
+        passwordHash: expect.any(String),
+      },
+    });
+    expect(result.organization.slug).toBe("acme");
+    expect(result.session.organizationId).toBe("org_1");
+
+    process.env.AUTH_RECOVERY_SECRET = previousSecret;
+  });
+
+  it("should reject owner recovery when the secret is invalid", async () => {
+    const previousSecret = process.env.AUTH_RECOVERY_SECRET;
+    process.env.AUTH_RECOVERY_SECRET = "top-secret";
+
+    await expect(
+      service.recoverOwnerAccess({
+        organizationSlug: "acme",
+        email: "owner@acme.com",
+        password: "OwnerPass123!",
+        recoverySecret: "wrong-secret",
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    process.env.AUTH_RECOVERY_SECRET = previousSecret;
+  });
+
+  it("should reject owner recovery when a password-backed owner already exists", async () => {
+    const previousSecret = process.env.AUTH_RECOVERY_SECRET;
+    process.env.AUTH_RECOVERY_SECRET = "top-secret";
+
+    prisma.membership.findFirst.mockResolvedValue({
+      organizationId: "org_1",
+      organization: { id: "org_1", name: "Acme", slug: "acme" },
+      user: {
+        id: "u1",
+        email: "owner@acme.com",
+        name: "Owner",
+        passwordHash: null,
+      },
+    });
+    prisma.membership.count.mockResolvedValue(1);
+
+    await expect(
+      service.recoverOwnerAccess({
+        organizationSlug: "acme",
+        email: "owner@acme.com",
+        password: "OwnerPass123!",
+        recoverySecret: "top-secret",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        message:
+          "Owner recovery is only available when the organization has no password-backed owners.",
+      },
+    });
+
+    process.env.AUTH_RECOVERY_SECRET = previousSecret;
+  });
+
+  it("should reject owner recovery when the target legacy owner does not exist", async () => {
+    const previousSecret = process.env.AUTH_RECOVERY_SECRET;
+    process.env.AUTH_RECOVERY_SECRET = "top-secret";
+    prisma.membership.findFirst.mockResolvedValue(null);
+
+    await expect(
+      service.recoverOwnerAccess({
+        organizationSlug: "acme",
+        email: "owner@acme.com",
+        password: "OwnerPass123!",
+        recoverySecret: "top-secret",
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+
+    process.env.AUTH_RECOVERY_SECRET = previousSecret;
   });
 });

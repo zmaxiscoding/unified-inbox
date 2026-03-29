@@ -30,10 +30,12 @@ Updated: 2026-03-29 (UTC)
 - Legacy users with `passwordHash = null` cannot use passwordless fallback; login returns an activation-required error and they must complete a fresh invite-based activation
 - `POST /auth/bootstrap` creates the first workspace, first user, and OWNER membership only when the DB is empty
 - Bootstrap is serialized with a DB advisory lock so only one first-owner transaction can win
+- `POST /auth/recover-owner` is an explicit cold-start recovery path guarded by `AUTH_RECOVERY_SECRET`; it only works when the target org currently has zero password-backed OWNER users
 - Invite onboarding:
   - new email: invite token + `name + password` creates the user, links membership, consumes the invite, and issues a session
   - existing email with a password: invite token + current password verifies the account, links membership, consumes the invite, and issues a session even if the user currently has zero memberships
   - existing email with `passwordHash = null`: a fresh invite acts as activation; the invite flow sets the password, preserves any existing membership, consumes the invite, and issues a session
+  - if the invited legacy user already has a valid session, the invite is not consumed until the password has also been set successfully
   - existing authenticated session is still accepted, but the authenticated email must match the invite email
 - `POST /auth/logout` clears the session cookie; protected routes use `SessionAuthGuard` and invalid cookies are cleared on rejection
 

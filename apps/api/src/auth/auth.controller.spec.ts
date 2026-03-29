@@ -6,6 +6,7 @@ import { AuthService } from "./auth.service";
 import { SessionPayload } from "./auth.types";
 import { BootstrapOwnerDto } from "./dto/bootstrap-owner.dto";
 import { LoginDto } from "./dto/login.dto";
+import { RecoverOwnerDto } from "./dto/recover-owner.dto";
 import { SessionAuthGuard } from "./session-auth.guard";
 import { SessionService } from "./session.service";
 
@@ -15,6 +16,7 @@ describe("AuthController", () => {
     login: jest.Mock;
     getBootstrapStatus: jest.Mock;
     bootstrapOwner: jest.Mock;
+    recoverOwnerAccess: jest.Mock;
     getSessionDetails: jest.Mock;
   };
   let sessionService: {
@@ -27,6 +29,7 @@ describe("AuthController", () => {
       login: jest.fn(),
       getBootstrapStatus: jest.fn(),
       bootstrapOwner: jest.fn(),
+      recoverOwnerAccess: jest.fn(),
       getSessionDetails: jest.fn(),
     };
     sessionService = {
@@ -135,6 +138,32 @@ describe("AuthController", () => {
     expect(result).toEqual({ ok: true });
   });
 
+  it("should set the session cookie after owner recovery", async () => {
+    authService.recoverOwnerAccess.mockResolvedValue({
+      user: { id: "u1", email: "owner@acme.com", name: "Owner" },
+      organization: { id: "org_1", name: "Acme", slug: "acme" },
+      session: { userId: "u1", organizationId: "org_1", iat: 1, exp: 2 },
+    });
+    sessionService.createSessionCookie.mockReturnValue("ui_session=recovered");
+
+    const res = { setHeader: jest.fn() } as unknown as Response;
+    const result = await controller.recoverOwner(
+      {
+        organizationSlug: "acme",
+        email: "owner@acme.com",
+        password: "OwnerPass123!",
+        recoverySecret: "top-secret",
+      },
+      res,
+    );
+
+    expect(res.setHeader).toHaveBeenCalledWith(
+      "Set-Cookie",
+      "ui_session=recovered",
+    );
+    expect(result.organization.slug).toBe("acme");
+  });
+
   it("should return current session details", async () => {
     const session: SessionPayload = {
       userId: "u1",
@@ -197,6 +226,36 @@ describe("AuthController", () => {
       email: "owner@acme.com",
       password: "OwnerPass123!",
       organizationName: "Acme Store",
+    });
+  });
+
+  it("should validate owner recovery payloads", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: RecoverOwnerDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform(
+        {
+          organizationSlug: "acme",
+          email: "owner@acme.com",
+          password: "OwnerPass123!",
+          recoverySecret: "top-secret",
+        },
+        metadata,
+      ),
+    ).resolves.toEqual({
+      organizationSlug: "acme",
+      email: "owner@acme.com",
+      password: "OwnerPass123!",
+      recoverySecret: "top-secret",
     });
   });
 });

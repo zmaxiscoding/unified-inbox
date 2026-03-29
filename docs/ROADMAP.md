@@ -75,7 +75,7 @@ Delivered:
 - Conversation resolve/reopen audit events
 - Instagram outbound sending via Instagram Graph API adapter
 - Channel access token encryption at rest (AES-256-GCM, env-based key)
-- Password-backed login, one-time owner bootstrap, invite-based account activation, and legacy/zero-membership re-invite compatibility
+- Password-backed login, one-time owner bootstrap, invite-based account activation, legacy/zero-membership re-invite compatibility, and owner cold-start recovery
 
 Remaining Tasks:
 - [ ] Expand audit event coverage for all critical mutations

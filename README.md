@@ -67,6 +67,12 @@ curl -i -c cookie.txt -X POST http://localhost:3001/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"agent@acme.com","password":"AgentPass123!"}'
 
+# Legacy tenant cold-start owner recovery
+# Sadece organization'da password-backed OWNER yoksa ve AUTH_RECOVERY_SECRET tanımlıysa çalışır.
+curl -i -c cookie.txt -X POST http://localhost:3001/auth/recover-owner \
+  -H "Content-Type: application/json" \
+  -d '{"organizationSlug":"acme-store","email":"owner@acme.com","password":"OwnerPass123!","recoverySecret":"<AUTH_RECOVERY_SECRET>"}'
+
 # Oturum bilgisi
 curl -b cookie.txt http://localhost:3001/auth/session
 

@@ -26,7 +26,7 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 - SSE realtime updates: `GET /events/stream` pushes org-scoped events to inbox UI
 - Instagram outbound: send parity with WhatsApp via account-scoped Instagram Graph API adapter
 - Token encryption: channel access tokens encrypted at rest; `CHANNEL_TOKEN_SECRET` required in production (fail-fast)
-- Auth: bcrypt-backed email/password login, one-time owner bootstrap, secure invite onboarding, legacy null-password activation via fresh invite, logout + session validation
+- Auth: bcrypt-backed email/password login, one-time owner bootstrap, secure invite onboarding, legacy null-password activation via fresh invite, cold-start owner recovery via `AUTH_RECOVERY_SECRET`, logout + session validation
 - SSE limitation: process-local only; does not work across multiple API instances or separate worker processes
 
 ## What Is Broken or Missing
@@ -43,7 +43,7 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 | # | Capability | Status | Notes |
 |---|------------|--------|-------|
 | 1 | Multi-tenant org/workspace isolation | Done | Session scoped by `organizationId`, DB queries tenant-scoped |
-| 2 | Role model (Owner/Agent) + authz | Done | Password login + session auth + owner gates + invite onboarding aligned, including legacy activation / re-invite compat |
+| 2 | Role model (Owner/Agent) + authz | Done | Password login + session auth + owner gates + invite onboarding aligned, including legacy activation / re-invite compat and owner cold-start recovery |
 | 3 | Team workflows (invites, role update, remove member) | Done | Transaction + lock + last-owner protections |
 | 4 | Assignment / tags / internal notes | Done | API + UI present, audit for assignment exists |
 | 5 | Inbox list + conversation messages + outbound reply | Done | Endpoints + web inbox UI functional |
