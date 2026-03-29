@@ -51,6 +51,7 @@ type SessionInfo = {
     id: string;
     name: string;
     email: string;
+    emailVerifiedAt?: string | null;
   };
   organization: {
     id: string;
@@ -153,6 +154,8 @@ export default function InboxPage() {
   const [isSending, setIsSending] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [verificationMessage, setVerificationMessage] = useState<string | null>(null);
+  const [isSendingVerificationEmail, setIsSendingVerificationEmail] = useState(false);
   const [sseStatus, setSseStatus] = useState<"connecting" | "connected" | "disconnected">("disconnected");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterChannel, setFilterChannel] = useState("");
@@ -312,6 +315,37 @@ export default function InboxPage() {
       setIsCheckingSession(false);
     }
   }, [router]);
+
+  const resendVerificationEmail = useCallback(async () => {
+    if (!session || isSendingVerificationEmail) return;
+
+    setIsSendingVerificationEmail(true);
+    setVerificationMessage(null);
+
+    try {
+      const response = await fetch("/api/auth/email-verification/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: session.user.email }),
+      });
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Verification request failed: ${response.status}`);
+      }
+
+      setVerificationMessage(
+        "Doğrulama linki gönderildi. Dev ortamında local outbox preview dosyasını kontrol edin.",
+      );
+    } catch {
+      setVerificationMessage("Doğrulama linki şu anda gönderilemedi.");
+    } finally {
+      setIsSendingVerificationEmail(false);
+    }
+  }, [isSendingVerificationEmail, router, session]);
 
   const fetchMessages = useCallback(async (conversationId: string) => {
     setIsLoadingMessages(true);
@@ -783,6 +817,35 @@ export default function InboxPage() {
 
   return (
     <main className="min-h-screen bg-slate-100 p-4 md:p-6">
+      {session && !session.user.emailVerifiedAt ? (
+        <section className="mx-auto mb-3 flex w-full max-w-6xl items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
+              Soft verification rollout
+            </p>
+            <p className="text-sm font-medium text-amber-900">
+              E-posta doğrulaması henüz tamamlanmadı
+            </p>
+            <p className="text-xs text-amber-800">
+              Bu sprintte enforcement açık değil; isterseniz doğrulama linkini yeniden gönderebilirsiniz.
+            </p>
+            {verificationMessage ? (
+              <p className="mt-1 text-xs text-amber-800">{verificationMessage}</p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={() => void resendVerificationEmail()}
+            disabled={isSendingVerificationEmail}
+            className="rounded-lg border border-amber-300 bg-white px-3 py-2 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSendingVerificationEmail
+              ? "Gönderiliyor..."
+              : "Doğrulama Linki Gönder"}
+          </button>
+        </section>
+      ) : null}
+
       {ENABLE_DEV_ENDPOINTS ? (
         <section className="mx-auto mb-3 w-full max-w-6xl rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">Dev only</p>

@@ -14,7 +14,11 @@ import { SessionPayload } from "./auth.types";
 import { SessionAuthGuard } from "./session-auth.guard";
 import { AuthService } from "./auth.service";
 import { BootstrapOwnerDto } from "./dto/bootstrap-owner.dto";
+import { EmailVerificationConfirmDto } from "./dto/email-verification-confirm.dto";
+import { EmailVerificationRequestDto } from "./dto/email-verification-request.dto";
 import { LoginDto } from "./dto/login.dto";
+import { PasswordResetConfirmDto } from "./dto/password-reset-confirm.dto";
+import { PasswordResetRequestDto } from "./dto/password-reset-request.dto";
 import { RecoverOwnerDto } from "./dto/recover-owner.dto";
 import { SessionService } from "./session.service";
 
@@ -75,6 +79,30 @@ export class AuthController {
       user: result.user,
       organization: result.organization,
     };
+  }
+
+  @Post("password-reset/request")
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  requestPasswordReset(@Body() dto: PasswordResetRequestDto) {
+    return this.authService.requestPasswordReset(dto);
+  }
+
+  @Post("password-reset/confirm")
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  confirmPasswordReset(@Body() dto: PasswordResetConfirmDto) {
+    return this.authService.confirmPasswordReset(dto);
+  }
+
+  @Post("email-verification/request")
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  requestEmailVerification(@Body() dto: EmailVerificationRequestDto) {
+    return this.authService.requestEmailVerification(dto);
+  }
+
+  @Post("email-verification/confirm")
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  confirmEmailVerification(@Body() dto: EmailVerificationConfirmDto) {
+    return this.authService.confirmEmailVerification(dto);
   }
 
   @Post("logout")

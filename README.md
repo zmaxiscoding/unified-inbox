@@ -54,6 +54,17 @@ pnpm db:reset         # DB'yi sıfırlar ve migration'ları yeniden uygular
 pnpm smoke:local      # API health + login + session + conversations smoke testi
 ```
 
+## Auth Recovery Baseline
+
+- `POST /auth/password-reset/request|confirm` ve `POST /auth/email-verification/request|confirm` endpoint'leri eklidir.
+- Request endpoint'leri account-enumeration safe davranır; mevcut / olmayan e-posta için aynı başarılı cevap döner.
+- Token'lar DB'de plaintext tutulmaz; `sha256` digest + expiry + single-use consume kullanılır.
+- Legacy `passwordHash = null` hesaplar password reset ile aktive edilmez; bu hesaplar fresh invite veya `POST /auth/recover-owner` ile devam eder.
+- E-posta gönderimi için henüz gerçek provider entegrasyonu yoktur.
+  - Development: varsayılan transport `outbox` ve preview dosyaları repo kökündeki `.auth-email-outbox/` altında oluşur.
+    Workspace script'leriyle bu pratikte çoğunlukla `apps/api/.auth-email-outbox/` olur.
+  - Production: `AUTH_EMAIL_TRANSPORT=disabled` bırakılırsa endpoint'ler generic/no-op kalır; bu yüzden email verification enforcement bilerek soft tutulur.
+
 ## API Örnekleri
 
 ```bash
@@ -72,6 +83,26 @@ curl -i -c cookie.txt -X POST http://localhost:3001/auth/login \
 curl -i -c cookie.txt -X POST http://localhost:3001/auth/recover-owner \
   -H "Content-Type: application/json" \
   -d '{"organizationSlug":"acme-store","email":"owner@acme.com","password":"OwnerPass123!","recoverySecret":"<AUTH_RECOVERY_SECRET>"}'
+
+# Password reset request (her zaman generic başarılı cevap döner)
+curl -i -X POST http://localhost:3001/auth/password-reset/request \
+  -H "Content-Type: application/json" \
+  -d '{"email":"agent@acme.com"}'
+
+# Password reset confirm
+curl -i -X POST http://localhost:3001/auth/password-reset/confirm \
+  -H "Content-Type: application/json" \
+  -d '{"token":"<reset_token>","password":"NewAgentPass123!"}'
+
+# Email verification request (her zaman generic başarılı cevap döner)
+curl -i -X POST http://localhost:3001/auth/email-verification/request \
+  -H "Content-Type: application/json" \
+  -d '{"email":"agent@acme.com"}'
+
+# Email verification confirm
+curl -i -X POST http://localhost:3001/auth/email-verification/confirm \
+  -H "Content-Type: application/json" \
+  -d '{"token":"<verification_token>"}'
 
 # Oturum bilgisi
 curl -b cookie.txt http://localhost:3001/auth/session

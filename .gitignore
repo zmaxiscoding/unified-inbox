@@ -35,3 +35,7 @@ Thumbs.db
 
 # Coverage
 coverage/
+
+# Local auth email preview outbox
+.auth-email-outbox/
+apps/api/.auth-email-outbox/

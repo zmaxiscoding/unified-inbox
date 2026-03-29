@@ -34,6 +34,7 @@ async function main() {
       email: "owner@acme.com",
       name: "Ali Yılmaz",
       passwordHash: ownerPasswordHash,
+      emailVerifiedAt: new Date(),
     },
   });
   const agent = await prisma.user.create({
@@ -41,6 +42,7 @@ async function main() {
       email: "agent@acme.com",
       name: "Zeynep Demir",
       passwordHash: agentPasswordHash,
+      emailVerifiedAt: new Date(),
     },
   });
 

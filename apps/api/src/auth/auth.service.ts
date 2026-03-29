@@ -6,12 +6,17 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from "@nestjs/common";
-import { timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import * as bcrypt from "bcryptjs";
 import { Prisma, Role } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { AuthEmailDeliveryService } from "./auth-email-delivery.service";
 import { LoginDto } from "./dto/login.dto";
 import { BootstrapOwnerDto } from "./dto/bootstrap-owner.dto";
+import { EmailVerificationConfirmDto } from "./dto/email-verification-confirm.dto";
+import { EmailVerificationRequestDto } from "./dto/email-verification-request.dto";
+import { PasswordResetConfirmDto } from "./dto/password-reset-confirm.dto";
+import { PasswordResetRequestDto } from "./dto/password-reset-request.dto";
 import { RecoverOwnerDto } from "./dto/recover-owner.dto";
 import { SessionPayload } from "./auth.types";
 import { SESSION_TTL_SECONDS } from "./session.constants";
@@ -28,12 +33,17 @@ const OWNER_RECOVERY_UNAVAILABLE_MESSAGE =
   "Owner recovery is only available when the organization has no password-backed owners.";
 const OWNER_RECOVERY_ALREADY_ACTIVE_MESSAGE =
   "Owner account already has a password. Use the normal login flow.";
+const PASSWORD_RESET_EXPIRY_MINUTES = 60;
+const EMAIL_VERIFICATION_EXPIRY_HOURS = 24;
 
 type AuthDbClient = PrismaService | Prisma.TransactionClient;
 
 @Injectable()
 export class AuthService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authEmailDelivery: AuthEmailDeliveryService,
+  ) {}
 
   async login(dto: LoginDto) {
     const email = dto.email.trim().toLowerCase();
@@ -126,6 +136,316 @@ export class AuthService {
     return {
       bootstrapEnabled: await this.isBootstrapAvailable(this.prisma),
     };
+  }
+
+  async requestPasswordReset(dto: PasswordResetRequestDto) {
+    if (!this.authEmailDelivery.isEnabled()) {
+      return { ok: true };
+    }
+
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        passwordHash: true,
+      },
+    });
+
+    if (!user?.passwordHash) {
+      return { ok: true };
+    }
+
+    const now = new Date();
+    const rawToken = this.createRawToken();
+    const tokenHash = this.hashToken(rawToken);
+    const expiresAt = new Date(now.getTime() + PASSWORD_RESET_EXPIRY_MINUTES * 60_000);
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.passwordResetToken.updateMany({
+          where: {
+            userId: user.id,
+            usedAt: null,
+            invalidatedAt: null,
+          },
+          data: {
+            invalidatedAt: now,
+          },
+        });
+
+        await tx.passwordResetToken.create({
+          data: {
+            userId: user.id,
+            tokenHash,
+            expiresAt,
+          },
+        });
+      });
+    } catch (error) {
+      if (this.isActiveAuthTokenUniqueViolation(error)) {
+        return { ok: true };
+      }
+
+      throw error;
+    }
+
+    try {
+      await this.authEmailDelivery.send({
+        kind: "password-reset",
+        to: user.email,
+        subject: "Reset your Unified Inbox password",
+        actionUrl: this.buildAppUrl("/password-reset", rawToken),
+        expiresAt,
+      });
+    } catch {
+      await this.prisma.passwordResetToken.updateMany({
+        where: {
+          tokenHash,
+          usedAt: null,
+          invalidatedAt: null,
+        },
+        data: {
+          invalidatedAt: new Date(),
+        },
+      });
+    }
+
+    return { ok: true };
+  }
+
+  async confirmPasswordReset(dto: PasswordResetConfirmDto) {
+    const tokenHash = this.hashToken(dto.token.trim());
+    const passwordHash = await bcrypt.hash(dto.password, PASSWORD_HASH_ROUNDS);
+
+    await this.prisma.$transaction(async (tx) => {
+      const resetToken = await tx.passwordResetToken.findUnique({
+        where: { tokenHash },
+        select: {
+          id: true,
+          userId: true,
+          expiresAt: true,
+          usedAt: true,
+          invalidatedAt: true,
+        },
+      });
+
+      if (!resetToken) {
+        throw new BadRequestException("Invalid password reset token");
+      }
+      if (resetToken.usedAt) {
+        throw new BadRequestException("Password reset link has already been used");
+      }
+      if (resetToken.invalidatedAt) {
+        throw new BadRequestException("Password reset link is no longer valid");
+      }
+
+      const now = new Date();
+      if (resetToken.expiresAt <= now) {
+        throw new BadRequestException("Password reset link has expired");
+      }
+
+      const consume = await tx.passwordResetToken.updateMany({
+        where: {
+          id: resetToken.id,
+          usedAt: null,
+          invalidatedAt: null,
+          expiresAt: { gt: now },
+        },
+        data: {
+          usedAt: now,
+        },
+      });
+
+      if (consume.count !== 1) {
+        const latest = await tx.passwordResetToken.findUnique({
+          where: { id: resetToken.id },
+          select: {
+            expiresAt: true,
+            usedAt: true,
+            invalidatedAt: true,
+          },
+        });
+
+        if (latest?.usedAt) {
+          throw new BadRequestException("Password reset link has already been used");
+        }
+        if (latest?.invalidatedAt) {
+          throw new BadRequestException("Password reset link is no longer valid");
+        }
+        if (latest && latest.expiresAt <= new Date()) {
+          throw new BadRequestException("Password reset link has expired");
+        }
+
+        throw new ConflictException("Password reset could not be completed");
+      }
+
+      await tx.user.update({
+        where: { id: resetToken.userId },
+        data: {
+          passwordHash,
+        },
+      });
+    });
+
+    return { ok: true };
+  }
+
+  async requestEmailVerification(dto: EmailVerificationRequestDto) {
+    if (!this.authEmailDelivery.isEnabled()) {
+      return { ok: true };
+    }
+
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      select: {
+        id: true,
+        email: true,
+        emailVerifiedAt: true,
+      },
+    });
+
+    if (!user || user.emailVerifiedAt) {
+      return { ok: true };
+    }
+
+    const now = new Date();
+    const rawToken = this.createRawToken();
+    const tokenHash = this.hashToken(rawToken);
+    const expiresAt = new Date(now.getTime() + EMAIL_VERIFICATION_EXPIRY_HOURS * 60 * 60_000);
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.emailVerificationToken.updateMany({
+          where: {
+            userId: user.id,
+            usedAt: null,
+            invalidatedAt: null,
+          },
+          data: {
+            invalidatedAt: now,
+          },
+        });
+
+        await tx.emailVerificationToken.create({
+          data: {
+            userId: user.id,
+            tokenHash,
+            expiresAt,
+          },
+        });
+      });
+    } catch (error) {
+      if (this.isActiveAuthTokenUniqueViolation(error)) {
+        return { ok: true };
+      }
+
+      throw error;
+    }
+
+    try {
+      await this.authEmailDelivery.send({
+        kind: "email-verification",
+        to: user.email,
+        subject: "Verify your Unified Inbox email",
+        actionUrl: this.buildAppUrl("/email-verification", rawToken),
+        expiresAt,
+      });
+    } catch {
+      await this.prisma.emailVerificationToken.updateMany({
+        where: {
+          tokenHash,
+          usedAt: null,
+          invalidatedAt: null,
+        },
+        data: {
+          invalidatedAt: new Date(),
+        },
+      });
+    }
+
+    return { ok: true };
+  }
+
+  async confirmEmailVerification(dto: EmailVerificationConfirmDto) {
+    const tokenHash = this.hashToken(dto.token.trim());
+
+    await this.prisma.$transaction(async (tx) => {
+      const verificationToken = await tx.emailVerificationToken.findUnique({
+        where: { tokenHash },
+        select: {
+          id: true,
+          userId: true,
+          expiresAt: true,
+          usedAt: true,
+          invalidatedAt: true,
+        },
+      });
+
+      if (!verificationToken) {
+        throw new BadRequestException("Invalid email verification token");
+      }
+      if (verificationToken.usedAt) {
+        throw new BadRequestException("Email verification link has already been used");
+      }
+      if (verificationToken.invalidatedAt) {
+        throw new BadRequestException("Email verification link is no longer valid");
+      }
+
+      const now = new Date();
+      if (verificationToken.expiresAt <= now) {
+        throw new BadRequestException("Email verification link has expired");
+      }
+
+      const consume = await tx.emailVerificationToken.updateMany({
+        where: {
+          id: verificationToken.id,
+          usedAt: null,
+          invalidatedAt: null,
+          expiresAt: { gt: now },
+        },
+        data: {
+          usedAt: now,
+        },
+      });
+
+      if (consume.count !== 1) {
+        const latest = await tx.emailVerificationToken.findUnique({
+          where: { id: verificationToken.id },
+          select: {
+            expiresAt: true,
+            usedAt: true,
+            invalidatedAt: true,
+          },
+        });
+
+        if (latest?.usedAt) {
+          throw new BadRequestException("Email verification link has already been used");
+        }
+        if (latest?.invalidatedAt) {
+          throw new BadRequestException("Email verification link is no longer valid");
+        }
+        if (latest && latest.expiresAt <= new Date()) {
+          throw new BadRequestException("Email verification link has expired");
+        }
+
+        throw new ConflictException("Email verification could not be completed");
+      }
+
+      await tx.user.updateMany({
+        where: {
+          id: verificationToken.userId,
+          emailVerifiedAt: null,
+        },
+        data: {
+          emailVerifiedAt: now,
+        },
+      });
+    });
+
+    return { ok: true };
   }
 
   async bootstrapOwner(dto: BootstrapOwnerDto) {
@@ -369,6 +689,7 @@ export class AuthService {
             id: true,
             email: true,
             name: true,
+            emailVerifiedAt: true,
           },
         },
         organization: {
@@ -400,6 +721,44 @@ export class AuthService {
 
   private async lockBootstrapGate(tx: Prisma.TransactionClient) {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(32561, 1)`;
+  }
+
+  private createRawToken() {
+    return randomBytes(32).toString("hex");
+  }
+
+  private hashToken(value: string) {
+    return createHash("sha256").update(value).digest("hex");
+  }
+
+  private buildAppUrl(path: string, rawToken: string) {
+    const appUrl = (process.env.APP_URL || "http://localhost:3000").replace(
+      /\/+$/,
+      "",
+    );
+
+    return `${appUrl}${path}?token=${rawToken}`;
+  }
+
+  private isActiveAuthTokenUniqueViolation(error: unknown) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError)) {
+      return false;
+    }
+
+    if (error.code !== "P2002") {
+      return false;
+    }
+
+    const target = Array.isArray(error.meta?.target)
+      ? error.meta?.target.join(",")
+      : String(error.meta?.target ?? "");
+    const normalizedTarget = target.toLowerCase();
+
+    return (
+      normalizedTarget.includes("password_reset_tokens_userid_active_unique") ||
+      normalizedTarget.includes("email_verification_tokens_userid_active_unique") ||
+      normalizedTarget.includes("userid")
+    );
   }
 
   private slugifyOrganizationName(value: string) {

@@ -31,6 +31,12 @@ Updated: 2026-03-29 (UTC)
 - `POST /auth/bootstrap` creates the first workspace, first user, and OWNER membership only when the DB is empty
 - Bootstrap is serialized with a DB advisory lock so only one first-owner transaction can win
 - `POST /auth/recover-owner` is an explicit cold-start recovery path guarded by `AUTH_RECOVERY_SECRET`; it only works when the target org currently has zero password-backed OWNER users
+- `POST /auth/password-reset/request` is account-enumeration safe; for password-backed users it creates a hashed, expiring, single-use token and dispatches via the configured auth email transport
+- `POST /auth/password-reset/confirm` consumes the token atomically and writes a fresh bcrypt password hash
+- `POST /auth/email-verification/request` is account-enumeration safe; for unverified users it creates a hashed, expiring, single-use token and dispatches via the configured auth email transport
+- `POST /auth/email-verification/confirm` consumes the token atomically and persists `users.emailVerifiedAt`
+- Current rollout keeps email verification enforcement soft to avoid bricking existing tenants; legacy password-backed users are backfilled as verified during migration, while new accounts can verify asynchronously
+- Current provider-agnostic transport is a file-backed outbox preview in development (`apps/api/.auth-email-outbox/` when using workspace scripts); production can safely leave transport disabled until a real provider is wired
 - Invite onboarding:
   - new email: invite token + `name + password` creates the user, links membership, consumes the invite, and issues a session
   - existing email with a password: invite token + current password verifies the account, links membership, consumes the invite, and issues a session even if the user currently has zero memberships
@@ -99,6 +105,9 @@ Idempotency:
 - Invite pending uniqueness: partial unique index on `(organizationId, email)` where invite is pending
 - Webhook idempotency: unique `(provider, providerMessageId)` on raw events
 - Invite accept single-use: conditional `updateMany` guard on `acceptedAt/revokedAt/expiresAt`
+- Password reset single active token per user: partial unique index on `password_reset_tokens(userId)` where token is active
+- Email verification single active token per user: partial unique index on `email_verification_tokens(userId)` where token is active
+- Password reset / email verification consume: conditional `updateMany` guard on `usedAt/invalidatedAt/expiresAt`
 - First-owner bootstrap serialization: advisory lock + empty-system check inside one transaction
 
 ## Test Infrastructure
@@ -110,4 +119,5 @@ Idempotency:
 
 ## Current Gaps
 
-- Password reset, email verification, and MFA are not implemented yet
+- Real email provider transport and optional hard enforcement of verified email are not implemented yet
+- MFA is not implemented yet
