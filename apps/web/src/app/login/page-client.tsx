@@ -6,6 +6,12 @@ import { useRouter } from "next/navigation";
 
 const DEFAULT_LOGIN_EMAIL = "agent@acme.com";
 const DEFAULT_LOGIN_PASSWORD = "AgentPass123!";
+const AUTH_EMAIL_VERIFICATION_REQUIRED_CODE = "AUTH_EMAIL_VERIFICATION_REQUIRED";
+
+type ErrorBody = {
+  message?: string | string[];
+  code?: string;
+};
 
 type LoginResponse =
   | {
@@ -23,11 +29,11 @@ type BootstrapStatusResponse = {
   bootstrapEnabled: boolean;
 };
 
-const getErrorMessage = async (response: Response, fallback: string) => {
-  const body = (await response.json().catch(() => null)) as
-    | { message?: string | string[] }
-    | null;
+const getErrorBody = async (response: Response) => {
+  return (await response.json().catch(() => null)) as ErrorBody | null;
+};
 
+const getErrorMessage = (body: ErrorBody | null, fallback: string) => {
   if (!body?.message) return fallback;
   if (Array.isArray(body.message)) {
     return body.message.join(", ");
@@ -49,6 +55,7 @@ export default function LoginPageClient({
   const [email, setEmail] = useState(DEFAULT_LOGIN_EMAIL);
   const [password, setPassword] = useState(DEFAULT_LOGIN_PASSWORD);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [verificationRequired, setVerificationRequired] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [organizations, setOrganizations] = useState<
     { id: string; name: string; slug: string }[]
@@ -70,6 +77,7 @@ export default function LoginPageClient({
   const completeLogin = async (organizationId?: string) => {
     setIsLoading(true);
     setErrorMessage(null);
+    setVerificationRequired(false);
 
     try {
       const response = await fetch("/api/auth/login", {
@@ -79,9 +87,14 @@ export default function LoginPageClient({
       });
 
       if (!response.ok) {
+        const body = await getErrorBody(response);
+        if (body?.code === AUTH_EMAIL_VERIFICATION_REQUIRED_CODE) {
+          setVerificationRequired(true);
+        }
+
         throw new Error(
-          await getErrorMessage(
-            response,
+          getErrorMessage(
+            body,
             "Giriş başarısız. E-posta, şifre ve üyelikleri kontrol edin.",
           ),
         );
@@ -134,8 +147,9 @@ export default function LoginPageClient({
           throw new Error("İlk owner kurulumu tamamlanmış. Giriş yapın.");
         }
 
+        const body = await getErrorBody(response);
         throw new Error(
-          await getErrorMessage(response, "İlk owner hesabı oluşturulamadı."),
+          getErrorMessage(body, "İlk owner hesabı oluşturulamadı."),
         );
       }
 
@@ -402,6 +416,15 @@ export default function LoginPageClient({
         {errorMessage ? (
           <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {errorMessage}
+          </div>
+        ) : null}
+
+        {verificationRequired ? (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Bu hesap yeni girişlerde e-posta doğrulaması istiyor.{" "}
+            <Link href={emailVerificationHref} className="font-medium underline">
+              Doğrulama linki iste
+            </Link>
           </div>
         ) : null}
       </div>

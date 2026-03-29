@@ -4,13 +4,18 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import * as bcrypt from "bcryptjs";
 import { Prisma, Role } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
-import { AuthEmailDeliveryService } from "./auth-email-delivery.service";
+import {
+  AuthEmailDeliveryError,
+  AuthEmailDeliveryService,
+  AuthEmailTransportMode,
+} from "./auth-email-delivery.service";
 import { LoginDto } from "./dto/login.dto";
 import { BootstrapOwnerDto } from "./dto/bootstrap-owner.dto";
 import { EmailVerificationConfirmDto } from "./dto/email-verification-confirm.dto";
@@ -27,6 +32,12 @@ const BOOTSTRAP_UNAVAILABLE_MESSAGE =
 const AUTH_ACTIVATION_REQUIRED_CODE = "AUTH_ACTIVATION_REQUIRED";
 const AUTH_ACTIVATION_REQUIRED_MESSAGE =
   "Account activation required. Ask an owner for a fresh invite to set your password.";
+const AUTH_EMAIL_VERIFICATION_REQUIRED_CODE = "AUTH_EMAIL_VERIFICATION_REQUIRED";
+const AUTH_EMAIL_VERIFICATION_REQUIRED_MESSAGE =
+  "Email verification is required before you can sign in. Request a new verification link and try again.";
+const AUTH_EMAIL_DELIVERY_FAILED_CODE = "AUTH_EMAIL_DELIVERY_FAILED";
+const AUTH_EMAIL_DELIVERY_FAILED_MESSAGE =
+  "Verification email could not be sent right now. Please try again.";
 const OWNER_RECOVERY_DISABLED_MESSAGE =
   "Owner recovery is disabled. Set AUTH_RECOVERY_SECRET to enable it.";
 const OWNER_RECOVERY_UNAVAILABLE_MESSAGE =
@@ -37,6 +48,19 @@ const PASSWORD_RESET_EXPIRY_MINUTES = 60;
 const EMAIL_VERIFICATION_EXPIRY_HOURS = 24;
 
 type AuthDbClient = PrismaService | Prisma.TransactionClient;
+type AuthEmailVerificationMode = "soft" | "login";
+
+type AuthLinkRequestResponse = {
+  ok: true;
+  deliveryMode: AuthEmailTransportMode;
+  requestState: "accepted" | "disabled";
+};
+
+type ResendEmailVerificationResponse = {
+  ok: true;
+  deliveryMode: AuthEmailTransportMode;
+  deliveryState: "already-verified" | "disabled" | "sent";
+};
 
 @Injectable()
 export class AuthService {
@@ -54,6 +78,7 @@ export class AuthService {
         email: true,
         name: true,
         passwordHash: true,
+        emailVerifiedAt: true,
         sessionVersion: true,
         memberships: {
           select: {
@@ -85,6 +110,13 @@ export class AuthService {
 
     if (!passwordMatches) {
       throw new UnauthorizedException("Invalid credentials");
+    }
+
+    if (this.getEmailVerificationMode() === "login" && !user.emailVerifiedAt) {
+      throw new ForbiddenException({
+        message: AUTH_EMAIL_VERIFICATION_REQUIRED_MESSAGE,
+        code: AUTH_EMAIL_VERIFICATION_REQUIRED_CODE,
+      });
     }
 
     if (user.memberships.length === 0) {
@@ -140,11 +172,11 @@ export class AuthService {
     };
   }
 
-  async requestPasswordReset(dto: PasswordResetRequestDto) {
+  async requestPasswordReset(dto: PasswordResetRequestDto): Promise<AuthLinkRequestResponse> {
     const deliveryMode = this.authEmailDelivery.getMode();
 
     if (deliveryMode === "disabled") {
-      return { ok: true, deliveryMode };
+      return { ok: true, deliveryMode, requestState: "disabled" };
     }
 
     const email = dto.email.trim().toLowerCase();
@@ -158,65 +190,18 @@ export class AuthService {
     });
 
     if (!user?.passwordHash) {
-      return { ok: true, deliveryMode };
+      return { ok: true, deliveryMode, requestState: "accepted" };
     }
 
-    const now = new Date();
-    const rawToken = this.createRawToken();
-    const tokenHash = this.hashToken(rawToken);
-    const expiresAt = new Date(now.getTime() + PASSWORD_RESET_EXPIRY_MINUTES * 60_000);
-
     try {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.passwordResetToken.updateMany({
-          where: {
-            userId: user.id,
-            usedAt: null,
-            invalidatedAt: null,
-          },
-          data: {
-            invalidatedAt: now,
-          },
-        });
-
-        await tx.passwordResetToken.create({
-          data: {
-            userId: user.id,
-            tokenHash,
-            expiresAt,
-          },
-        });
-      });
+      await this.createAndSendPasswordResetToken(user);
     } catch (error) {
-      if (this.isActiveAuthTokenUniqueViolation(error)) {
-        return { ok: true, deliveryMode };
+      if (!(error instanceof AuthEmailDeliveryError)) {
+        throw error;
       }
-
-      throw error;
     }
 
-    try {
-      await this.authEmailDelivery.send({
-        kind: "password-reset",
-        to: user.email,
-        subject: "Reset your Unified Inbox password",
-        actionUrl: this.buildAppUrl("/password-reset", rawToken),
-        expiresAt,
-      });
-    } catch {
-      await this.prisma.passwordResetToken.updateMany({
-        where: {
-          tokenHash,
-          usedAt: null,
-          invalidatedAt: null,
-        },
-        data: {
-          invalidatedAt: new Date(),
-        },
-      });
-    }
-
-    return { ok: true, deliveryMode };
+    return { ok: true, deliveryMode, requestState: "accepted" };
   }
 
   async confirmPasswordReset(dto: PasswordResetConfirmDto) {
@@ -297,11 +282,13 @@ export class AuthService {
     return { ok: true };
   }
 
-  async requestEmailVerification(dto: EmailVerificationRequestDto) {
+  async requestEmailVerification(
+    dto: EmailVerificationRequestDto,
+  ): Promise<AuthLinkRequestResponse> {
     const deliveryMode = this.authEmailDelivery.getMode();
 
     if (deliveryMode === "disabled") {
-      return { ok: true, deliveryMode };
+      return { ok: true, deliveryMode, requestState: "disabled" };
     }
 
     const email = dto.email.trim().toLowerCase();
@@ -315,65 +302,51 @@ export class AuthService {
     });
 
     if (!user || user.emailVerifiedAt) {
-      return { ok: true, deliveryMode };
+      return { ok: true, deliveryMode, requestState: "accepted" };
     }
 
-    const now = new Date();
-    const rawToken = this.createRawToken();
-    const tokenHash = this.hashToken(rawToken);
-    const expiresAt = new Date(now.getTime() + EMAIL_VERIFICATION_EXPIRY_HOURS * 60 * 60_000);
+    try {
+      await this.createAndSendEmailVerificationToken(user);
+    } catch (error) {
+      if (!(error instanceof AuthEmailDeliveryError)) {
+        throw error;
+      }
+    }
+
+    return { ok: true, deliveryMode, requestState: "accepted" };
+  }
+
+  async resendEmailVerification(
+    session: SessionPayload,
+  ): Promise<ResendEmailVerificationResponse> {
+    const deliveryMode = this.authEmailDelivery.getMode();
+
+    if (deliveryMode === "disabled") {
+      return { ok: true, deliveryMode, deliveryState: "disabled" };
+    }
+
+    const details = await this.getSessionDetails(session);
+    if (details.user.emailVerifiedAt) {
+      return { ok: true, deliveryMode, deliveryState: "already-verified" };
+    }
 
     try {
-      await this.prisma.$transaction(async (tx) => {
-        await tx.emailVerificationToken.updateMany({
-          where: {
-            userId: user.id,
-            usedAt: null,
-            invalidatedAt: null,
-          },
-          data: {
-            invalidatedAt: now,
-          },
-        });
-
-        await tx.emailVerificationToken.create({
-          data: {
-            userId: user.id,
-            tokenHash,
-            expiresAt,
-          },
-        });
+      await this.createAndSendEmailVerificationToken({
+        id: details.user.id,
+        email: details.user.email,
       });
     } catch (error) {
-      if (this.isActiveAuthTokenUniqueViolation(error)) {
-        return { ok: true, deliveryMode };
+      if (!(error instanceof AuthEmailDeliveryError)) {
+        throw error;
       }
 
-      throw error;
-    }
-
-    try {
-      await this.authEmailDelivery.send({
-        kind: "email-verification",
-        to: user.email,
-        subject: "Verify your Unified Inbox email",
-        actionUrl: this.buildAppUrl("/email-verification", rawToken),
-        expiresAt,
-      });
-    } catch {
-      await this.prisma.emailVerificationToken.updateMany({
-        where: {
-          tokenHash,
-          usedAt: null,
-          invalidatedAt: null,
-        },
-        data: {
-          invalidatedAt: new Date(),
-        },
+      throw new ServiceUnavailableException({
+        message: AUTH_EMAIL_DELIVERY_FAILED_MESSAGE,
+        code: AUTH_EMAIL_DELIVERY_FAILED_CODE,
       });
     }
 
-    return { ok: true, deliveryMode };
+    return { ok: true, deliveryMode, deliveryState: "sent" };
   }
 
   async confirmEmailVerification(dto: EmailVerificationConfirmDto) {
@@ -735,6 +708,7 @@ export class AuthService {
 
     return {
       role: membership.role,
+      emailVerificationMode: this.getEmailVerificationMode(),
       user: {
         id: membership.user.id,
         email: membership.user.email,
@@ -743,6 +717,144 @@ export class AuthService {
       },
       organization: membership.organization,
     };
+  }
+
+  private async createAndSendPasswordResetToken(user: { id: string; email: string }) {
+    const now = new Date();
+    const rawToken = this.createRawToken();
+    const tokenHash = this.hashToken(rawToken);
+    const expiresAt = new Date(now.getTime() + PASSWORD_RESET_EXPIRY_MINUTES * 60_000);
+    let tokenId: string | null = null;
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.passwordResetToken.updateMany({
+          where: {
+            userId: user.id,
+            usedAt: null,
+            invalidatedAt: null,
+          },
+          data: {
+            invalidatedAt: now,
+          },
+        });
+
+        const token = await tx.passwordResetToken.create({
+          data: {
+            userId: user.id,
+            tokenHash,
+            expiresAt,
+          },
+          select: {
+            id: true,
+          },
+        });
+
+        tokenId = token.id;
+      });
+    } catch (error) {
+      if (this.isActiveAuthTokenUniqueViolation(error)) {
+        return null;
+      }
+
+      throw error;
+    }
+
+    try {
+      return await this.authEmailDelivery.send({
+        kind: "password-reset",
+        to: user.email,
+        subject: "Reset your Unified Inbox password",
+        actionUrl: this.buildAppUrl("/password-reset", rawToken),
+        expiresAt,
+        deliveryId: tokenId ?? tokenHash,
+      });
+    } catch (error) {
+      await this.invalidatePasswordResetToken(tokenHash);
+      throw this.toAuthEmailDeliveryError(error);
+    }
+  }
+
+  private async createAndSendEmailVerificationToken(user: { id: string; email: string }) {
+    const now = new Date();
+    const rawToken = this.createRawToken();
+    const tokenHash = this.hashToken(rawToken);
+    const expiresAt = new Date(now.getTime() + EMAIL_VERIFICATION_EXPIRY_HOURS * 60 * 60_000);
+    let tokenId: string | null = null;
+
+    try {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.emailVerificationToken.updateMany({
+          where: {
+            userId: user.id,
+            usedAt: null,
+            invalidatedAt: null,
+          },
+          data: {
+            invalidatedAt: now,
+          },
+        });
+
+        const token = await tx.emailVerificationToken.create({
+          data: {
+            userId: user.id,
+            tokenHash,
+            expiresAt,
+          },
+          select: {
+            id: true,
+          },
+        });
+
+        tokenId = token.id;
+      });
+    } catch (error) {
+      if (this.isActiveAuthTokenUniqueViolation(error)) {
+        return null;
+      }
+
+      throw error;
+    }
+
+    try {
+      return await this.authEmailDelivery.send({
+        kind: "email-verification",
+        to: user.email,
+        subject: "Verify your Unified Inbox email",
+        actionUrl: this.buildAppUrl("/email-verification", rawToken),
+        expiresAt,
+        deliveryId: tokenId ?? tokenHash,
+      });
+    } catch (error) {
+      await this.invalidateEmailVerificationToken(tokenHash);
+      throw this.toAuthEmailDeliveryError(error);
+    }
+  }
+
+  private async invalidatePasswordResetToken(tokenHash: string) {
+    await this.prisma.passwordResetToken.updateMany({
+      where: {
+        tokenHash,
+        usedAt: null,
+        invalidatedAt: null,
+      },
+      data: {
+        invalidatedAt: new Date(),
+      },
+    });
+  }
+
+  private async invalidateEmailVerificationToken(tokenHash: string) {
+    await this.prisma.emailVerificationToken.updateMany({
+      where: {
+        tokenHash,
+        usedAt: null,
+        invalidatedAt: null,
+      },
+      data: {
+        invalidatedAt: new Date(),
+      },
+    });
   }
 
   private async isBootstrapAvailable(db: AuthDbClient) {
@@ -774,6 +886,33 @@ export class AuthService {
     );
 
     return `${appUrl}${path}?token=${rawToken}`;
+  }
+
+  private getEmailVerificationMode(): AuthEmailVerificationMode {
+    const configuredMode = process.env.AUTH_EMAIL_VERIFICATION_MODE?.trim().toLowerCase();
+
+    if (!configuredMode || configuredMode === "soft") {
+      return "soft";
+    }
+
+    if (configuredMode === "login") {
+      return "login";
+    }
+
+    throw new Error(
+      "AUTH_EMAIL_VERIFICATION_MODE must be one of: soft, login",
+    );
+  }
+
+  private toAuthEmailDeliveryError(error: unknown) {
+    if (error instanceof AuthEmailDeliveryError) {
+      return error;
+    }
+
+    return new AuthEmailDeliveryError(
+      "Auth email delivery failed",
+      this.authEmailDelivery.getMode() === "resend" ? "resend" : "outbox",
+    );
   }
 
   private isActiveAuthTokenUniqueViolation(error: unknown) {

@@ -58,11 +58,13 @@ type SessionInfo = {
     name: string;
     slug: string;
   };
+  emailVerificationMode?: "soft" | "login";
 };
 
-type AuthLinkRequestResponse = {
+type ResendVerificationResponse = {
   ok: boolean;
-  deliveryMode?: "outbox" | "disabled";
+  deliveryMode?: "outbox" | "disabled" | "resend";
+  deliveryState?: "already-verified" | "disabled" | "sent";
 };
 
 type OrganizationMember = {
@@ -328,10 +330,8 @@ export default function InboxPage() {
     setVerificationMessage(null);
 
     try {
-      const response = await fetch("/api/auth/email-verification/request", {
+      const response = await fetch("/api/auth/email-verification/resend", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: session.user.email }),
       });
 
       if (response.status === 401) {
@@ -343,17 +343,21 @@ export default function InboxPage() {
       }
 
       const body = (await response.json().catch(() => null)) as
-        | AuthLinkRequestResponse
+        | ResendVerificationResponse
         | null;
 
-      if (body?.deliveryMode === "disabled") {
+      if (body?.deliveryState === "already-verified") {
+        setVerificationMessage("Bu hesap zaten doğrulanmış görünüyor. Sayfayı yenileyebilirsiniz.");
+      } else if (body?.deliveryState === "disabled" || body?.deliveryMode === "disabled") {
         setVerificationMessage(
           "Bu ortamda e-posta gönderimi kapalı. Doğrulama linki otomatik gönderilemiyor.",
         );
-      } else {
+      } else if (body?.deliveryMode === "outbox") {
         setVerificationMessage(
-          "Doğrulama isteği alındı. Bu ortam outbox kullanıyor; teslim başarılı olduysa preview dosyası oluşur.",
+          "Doğrulama linki oluşturuldu. Local outbox preview dosyasını kontrol edin.",
         );
+      } else {
+        setVerificationMessage("Doğrulama e-postasi gonderildi. Gelen kutunuzu kontrol edin.");
       }
     } catch {
       setVerificationMessage("Doğrulama linki şu anda gönderilemedi.");
@@ -836,13 +840,17 @@ export default function InboxPage() {
         <section className="mx-auto mb-3 flex w-full max-w-6xl items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-700">
-              Soft verification rollout
+              {session.emailVerificationMode === "login"
+                ? "Login verification gate"
+                : "Soft verification rollout"}
             </p>
             <p className="text-sm font-medium text-amber-900">
               E-posta doğrulaması henüz tamamlanmadı
             </p>
             <p className="text-xs text-amber-800">
-              Bu sprintte enforcement açık değil; isterseniz doğrulama linkini yeniden gönderebilirsiniz.
+              {session.emailVerificationMode === "login"
+                ? "Bu oturum acik kaldi, ancak yeni girislerde e-posta dogrulamasi gerekecek."
+                : "Bu sprintte enforcement acik degil; isterseniz dogrulama linkini yeniden gonderebilirsiniz."}
             </p>
             {verificationMessage ? (
               <p className="mt-1 text-xs text-amber-800">{verificationMessage}</p>

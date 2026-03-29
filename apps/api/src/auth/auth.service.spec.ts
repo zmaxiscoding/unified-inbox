@@ -2,12 +2,16 @@ import {
   ConflictException,
   ForbiddenException,
   NotFoundException,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from "@nestjs/common";
 import * as bcrypt from "bcryptjs";
 import { Role } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
-import { AuthEmailDeliveryService } from "./auth-email-delivery.service";
+import {
+  AuthEmailDeliveryError,
+  AuthEmailDeliveryService,
+} from "./auth-email-delivery.service";
 import { AuthService } from "./auth.service";
 
 describe("AuthService", () => {
@@ -47,6 +51,8 @@ describe("AuthService", () => {
   };
 
   beforeEach(() => {
+    delete process.env.AUTH_EMAIL_VERIFICATION_MODE;
+
     prisma = {
       user: {
         findUnique: jest.fn(),
@@ -94,7 +100,9 @@ describe("AuthService", () => {
 
     prisma.$queryRaw.mockResolvedValue([]);
     prisma.passwordResetToken.updateMany.mockResolvedValue({ count: 1 });
+    prisma.passwordResetToken.create.mockResolvedValue({ id: "prt_1" });
     prisma.emailVerificationToken.updateMany.mockResolvedValue({ count: 1 });
+    prisma.emailVerificationToken.create.mockResolvedValue({ id: "evt_1" });
     prisma.user.update.mockResolvedValue({});
     prisma.user.updateMany.mockResolvedValue({ count: 1 });
 
@@ -240,6 +248,42 @@ describe("AuthService", () => {
         organizationId: "org_2",
       }),
     ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("should block login for unverified users when verification mode is login", async () => {
+    const previousMode = process.env.AUTH_EMAIL_VERIFICATION_MODE;
+    process.env.AUTH_EMAIL_VERIFICATION_MODE = "login";
+
+    const passwordHash = await bcrypt.hash("AgentPass123!", 4);
+    prisma.user.findUnique.mockResolvedValue({
+      id: "u1",
+      email: "agent@acme.com",
+      name: "Agent",
+      passwordHash,
+      emailVerifiedAt: null,
+      sessionVersion: 0,
+      memberships: [
+        {
+          organizationId: "org_1",
+          organization: { id: "org_1", name: "Acme", slug: "acme" },
+        },
+      ],
+    });
+
+    await expect(
+      service.login({
+        email: "agent@acme.com",
+        password: "AgentPass123!",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: "AUTH_EMAIL_VERIFICATION_REQUIRED",
+        message:
+          "Email verification is required before you can sign in. Request a new verification link and try again.",
+      },
+    });
+
+    process.env.AUTH_EMAIL_VERIFICATION_MODE = previousMode;
   });
 
   it("should report bootstrap status when the system is empty", async () => {
@@ -441,7 +485,11 @@ describe("AuthService", () => {
 
     await expect(
       service.requestPasswordReset({ email: "missing@acme.com" }),
-    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "outbox",
+      requestState: "accepted",
+    });
 
     expect(prisma.passwordResetToken.create).not.toHaveBeenCalled();
     expect(emailDelivery.send).not.toHaveBeenCalled();
@@ -456,7 +504,11 @@ describe("AuthService", () => {
 
     await expect(
       service.requestPasswordReset({ email: "legacy@acme.com" }),
-    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "outbox",
+      requestState: "accepted",
+    });
 
     expect(prisma.passwordResetToken.create).not.toHaveBeenCalled();
     expect(emailDelivery.send).not.toHaveBeenCalled();
@@ -471,7 +523,11 @@ describe("AuthService", () => {
 
     await expect(
       service.requestPasswordReset({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "outbox",
+      requestState: "accepted",
+    });
 
     expect(prisma.passwordResetToken.updateMany).toHaveBeenCalledWith({
       where: {
@@ -489,6 +545,9 @@ describe("AuthService", () => {
         tokenHash: expect.any(String),
         expiresAt: expect.any(Date),
       },
+      select: {
+        id: true,
+      },
     });
     expect(prisma.passwordResetToken.create.mock.calls[0][0].data.tokenHash).toHaveLength(
       64,
@@ -499,6 +558,7 @@ describe("AuthService", () => {
         to: "agent@acme.com",
         subject: "Reset your Unified Inbox password",
         actionUrl: expect.stringContaining("/password-reset?token="),
+        deliveryId: expect.any(String),
       }),
     );
   });
@@ -513,7 +573,11 @@ describe("AuthService", () => {
 
     await expect(
       service.requestPasswordReset({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "outbox",
+      requestState: "accepted",
+    });
 
     expect(prisma.passwordResetToken.updateMany).toHaveBeenNthCalledWith(
       2,
@@ -533,7 +597,11 @@ describe("AuthService", () => {
 
     await expect(
       service.requestPasswordReset({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true, deliveryMode: "disabled" });
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "disabled",
+      requestState: "disabled",
+    });
 
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
     expect(emailDelivery.send).not.toHaveBeenCalled();
@@ -650,7 +718,11 @@ describe("AuthService", () => {
 
     await expect(
       service.requestEmailVerification({ email: "missing@acme.com" }),
-    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "outbox",
+      requestState: "accepted",
+    });
 
     expect(prisma.emailVerificationToken.create).not.toHaveBeenCalled();
     expect(emailDelivery.send).not.toHaveBeenCalled();
@@ -665,7 +737,11 @@ describe("AuthService", () => {
 
     await expect(
       service.requestEmailVerification({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "outbox",
+      requestState: "accepted",
+    });
 
     expect(prisma.emailVerificationToken.create).not.toHaveBeenCalled();
     expect(emailDelivery.send).not.toHaveBeenCalled();
@@ -680,7 +756,11 @@ describe("AuthService", () => {
 
     await expect(
       service.requestEmailVerification({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "outbox",
+      requestState: "accepted",
+    });
 
     expect(prisma.emailVerificationToken.updateMany).toHaveBeenCalledWith({
       where: {
@@ -698,6 +778,9 @@ describe("AuthService", () => {
         tokenHash: expect.any(String),
         expiresAt: expect.any(Date),
       },
+      select: {
+        id: true,
+      },
     });
     expect(emailDelivery.send).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -705,6 +788,36 @@ describe("AuthService", () => {
         to: "agent@acme.com",
         subject: "Verify your Unified Inbox email",
         actionUrl: expect.stringContaining("/email-verification?token="),
+        deliveryId: expect.any(String),
+      }),
+    );
+  });
+
+  it("should invalidate the fresh email verification token if delivery fails", async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: "u1",
+      email: "agent@acme.com",
+      emailVerifiedAt: null,
+    });
+    emailDelivery.send.mockRejectedValue(new Error("resend unavailable"));
+
+    await expect(
+      service.requestEmailVerification({ email: "agent@acme.com" }),
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "outbox",
+      requestState: "accepted",
+    });
+
+    expect(prisma.emailVerificationToken.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tokenHash: expect.any(String),
+        }),
+        data: {
+          invalidatedAt: expect.any(Date),
+        },
       }),
     );
   });
@@ -714,9 +827,135 @@ describe("AuthService", () => {
 
     await expect(
       service.requestEmailVerification({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true, deliveryMode: "disabled" });
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "disabled",
+      requestState: "disabled",
+    });
 
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("should resend an email verification link for the authenticated user", async () => {
+    prisma.membership.findUnique.mockResolvedValue({
+      role: Role.AGENT,
+      user: {
+        id: "u1",
+        email: "agent@acme.com",
+        name: "Agent",
+        emailVerifiedAt: null,
+        sessionVersion: 0,
+      },
+      organization: {
+        id: "org_1",
+        name: "Acme",
+        slug: "acme",
+      },
+    });
+
+    await expect(
+      service.resendEmailVerification({
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "outbox",
+      deliveryState: "sent",
+    });
+
+    expect(emailDelivery.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "email-verification",
+        to: "agent@acme.com",
+      }),
+    );
+  });
+
+  it("should report already verified when authenticated resend is unnecessary", async () => {
+    prisma.membership.findUnique.mockResolvedValue({
+      role: Role.AGENT,
+      user: {
+        id: "u1",
+        email: "agent@acme.com",
+        name: "Agent",
+        emailVerifiedAt: new Date(),
+        sessionVersion: 0,
+      },
+      organization: {
+        id: "org_1",
+        name: "Acme",
+        slug: "acme",
+      },
+    });
+
+    await expect(
+      service.resendEmailVerification({
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "outbox",
+      deliveryState: "already-verified",
+    });
+
+    expect(emailDelivery.send).not.toHaveBeenCalled();
+  });
+
+  it("should fail authenticated resend when delivery fails", async () => {
+    prisma.membership.findUnique.mockResolvedValue({
+      role: Role.AGENT,
+      user: {
+        id: "u1",
+        email: "agent@acme.com",
+        name: "Agent",
+        emailVerifiedAt: null,
+        sessionVersion: 0,
+      },
+      organization: {
+        id: "org_1",
+        name: "Acme",
+        slug: "acme",
+      },
+    });
+    emailDelivery.send.mockRejectedValue(new AuthEmailDeliveryError("failed", "outbox"));
+
+    await expect(
+      service.resendEmailVerification({
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+
+  it("should keep authenticated resend as disabled when transport is disabled", async () => {
+    emailDelivery.getMode.mockReturnValue("disabled");
+
+    await expect(
+      service.resendEmailVerification({
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "disabled",
+      deliveryState: "disabled",
+    });
+
+    expect(prisma.membership.findUnique).not.toHaveBeenCalled();
   });
 
   it("should verify the email and consume the token atomically", async () => {
@@ -820,5 +1059,52 @@ describe("AuthService", () => {
         exp: 2,
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it("should expose the current email verification mode in session details", async () => {
+    const previousMode = process.env.AUTH_EMAIL_VERIFICATION_MODE;
+    process.env.AUTH_EMAIL_VERIFICATION_MODE = "login";
+
+    prisma.membership.findUnique.mockResolvedValue({
+      role: Role.OWNER,
+      user: {
+        id: "u1",
+        email: "agent@acme.com",
+        name: "Agent",
+        emailVerifiedAt: new Date(),
+        sessionVersion: 1,
+      },
+      organization: {
+        id: "org_1",
+        name: "Acme",
+        slug: "acme",
+      },
+    });
+
+    await expect(
+      service.getSessionDetails({
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 1,
+        iat: 1,
+        exp: 2,
+      }),
+    ).resolves.toEqual({
+      role: Role.OWNER,
+      emailVerificationMode: "login",
+      user: {
+        id: "u1",
+        email: "agent@acme.com",
+        name: "Agent",
+        emailVerifiedAt: expect.any(Date),
+      },
+      organization: {
+        id: "org_1",
+        name: "Acme",
+        slug: "acme",
+      },
+    });
+
+    process.env.AUTH_EMAIL_VERIFICATION_MODE = previousMode;
   });
 });

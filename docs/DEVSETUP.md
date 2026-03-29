@@ -88,15 +88,35 @@ Invite onboarding notes:
 
 Password reset + email verification notes:
 - Development varsayılan transport `AUTH_EMAIL_TRANSPORT=outbox` olup preview dosyaları workspace script'lerinde çoğunlukla `apps/api/.auth-email-outbox/` altında oluşur.
-- Production için gerçek provider henüz yoktur; `AUTH_EMAIL_TRANSPORT=disabled` güvenli no-op davranışıdır.
-- Bu nedenle email verification enforcement bilerek soft bırakılmıştır; tracking + request/confirm + resend baseline aktiftir.
+- Production-ready baseline için `AUTH_EMAIL_TRANSPORT=resend` desteklenir.
+- `AUTH_EMAIL_FROM` etkin transport'larda zorunlu gönderici adresidir. `RESEND_API_KEY` yalnızca `resend` modunda gereklidir.
+- Verification rollout gate'i `AUTH_EMAIL_VERIFICATION_MODE=soft|login` ile kontrol edilir; varsayılan `soft` düşük-risk davranıştır.
+- Guard: `AUTH_EMAIL_VERIFICATION_MODE=login` ile `AUTH_EMAIL_TRANSPORT=disabled` birlikte kullanılamaz; app fail-fast olur.
+- Public request endpoint'leri enumeration-safe kalır ve generic/accepted cevap döner. Authenticated inbox banner resend akışı ise gerçek delivery outcome'unu daha net gösterir.
 - Password reset yalnızca password-backed hesaplar içindir; legacy `passwordHash = null` kullanıcılar fresh invite / owner recovery ile devam eder.
+
+Suggested local auth email config:
+
+```bash
+# apps/api/.env
+AUTH_EMAIL_TRANSPORT=outbox
+AUTH_EMAIL_FROM="Unified Inbox <no-reply@example.test>"
+AUTH_EMAIL_OUTBOX_DIR=.auth-email-outbox
+AUTH_EMAIL_VERIFICATION_MODE=soft
+# RESEND_API_KEY=re_xxxxx   # sadece AUTH_EMAIL_TRANSPORT=resend ise
+```
 
 Quick preview check:
 
 ```bash
 find apps/api/.auth-email-outbox -type f | sort | tail -n 3
 cat apps/api/.auth-email-outbox/<preview-file>.json
+```
+
+Optional outbox smoke:
+
+```bash
+SMOKE_AUTH_EMAIL=1 SMOKE_AUTH_EMAIL_OUTBOX_DIR=apps/api/.auth-email-outbox pnpm smoke:local
 ```
 
 ## Troubleshooting
