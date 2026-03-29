@@ -240,7 +240,14 @@ export default function ChannelsSettingsPage() {
               {session.organization.name} • {session.user.name}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => router.push("/settings/audit-log")}
+              className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100"
+            >
+              Audit Log
+            </button>
             <button
               type="button"
               onClick={() => router.push("/inbox")}
