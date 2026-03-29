@@ -6,6 +6,7 @@ async function bootstrap() {
     rawBody: true,
   });
   app.enableCors();
+  app.enableShutdownHooks();
   await app.listen(process.env.PORT ?? 3001);
 }
 

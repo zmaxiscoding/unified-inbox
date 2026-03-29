@@ -2,18 +2,19 @@ import { EventsController } from "./events.controller";
 import { EventsService } from "./events.service";
 import { firstValueFrom } from "rxjs";
 import { Request } from "express";
+import { LocalOnlyEventsTransport } from "./local-only-events.transport";
 
 describe("EventsController", () => {
   let controller: EventsController;
   let eventsService: EventsService;
 
   beforeEach(() => {
-    eventsService = new EventsService();
+    eventsService = new EventsService(new LocalOnlyEventsTransport());
     controller = new EventsController(eventsService);
   });
 
-  afterEach(() => {
-    eventsService.onModuleDestroy();
+  afterEach(async () => {
+    await eventsService.onModuleDestroy();
   });
 
   it("should return SSE stream that emits org-scoped events", async () => {

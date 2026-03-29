@@ -9,6 +9,9 @@ import { ConversationsService } from "./conversations.service";
 
 describe("ConversationsService", () => {
   let service: ConversationsService;
+  let eventsService: {
+    emit: jest.Mock;
+  };
   let prisma: {
     conversation: {
       findFirst: jest.Mock;
@@ -91,11 +94,11 @@ describe("ConversationsService", () => {
       enqueue: jest.fn(),
     };
 
-    const eventsService = { emit: jest.fn() } as unknown as EventsService;
+    eventsService = { emit: jest.fn() };
     service = new ConversationsService(
       prisma as unknown as PrismaService,
       outboundQueue as unknown as OutboundQueueService,
-      eventsService,
+      eventsService as unknown as EventsService,
     );
   });
 
@@ -147,6 +150,18 @@ describe("ConversationsService", () => {
       deliveryStatus: "QUEUED",
       createdAt: new Date("2026-03-05T10:00:00.000Z"),
       senderDisplay: "Agent",
+    });
+    expect(eventsService.emit).toHaveBeenCalledWith("org_1", {
+      type: "message.created",
+      conversationId: "conv_1",
+      payload: {
+        id: "msg_1",
+        direction: "OUTBOUND",
+        text: "Merhaba",
+        deliveryStatus: "QUEUED",
+        createdAt: new Date("2026-03-05T10:00:00.000Z"),
+        senderDisplay: "Agent",
+      },
     });
   });
 
@@ -326,6 +341,11 @@ describe("ConversationsService", () => {
         organizationId: "org_1",
         actorId: "actor_1",
       },
+    });
+    expect(eventsService.emit).toHaveBeenCalledWith("org_1", {
+      type: "conversation.updated",
+      conversationId: "conv_1",
+      payload: { action: "statusChanged", id: "conv_1", status: "RESOLVED" },
     });
   });
 
@@ -609,6 +629,20 @@ describe("ConversationsService", () => {
         createdAt: true,
         author: {
           select: { id: true, name: true, email: true },
+        },
+      },
+    });
+    expect(eventsService.emit).toHaveBeenCalledWith("org_1", {
+      type: "note.created",
+      conversationId: "conv_1",
+      payload: {
+        id: "n1",
+        body: "İade talebi var",
+        createdAt: new Date("2026-03-01T11:00:00.000Z"),
+        author: {
+          id: "usr_1",
+          name: "Zeynep Demir",
+          email: "agent@acme.com",
         },
       },
     });

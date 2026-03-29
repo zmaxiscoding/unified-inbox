@@ -51,7 +51,7 @@ pnpm prisma:generate  # Prisma Client üretir
 pnpm db:migrate       # Migration oluşturur ve uygular (dev)
 pnpm db:seed          # Seed verisini yükler
 pnpm db:reset         # DB'yi sıfırlar ve migration'ları yeniden uygular
-pnpm smoke:local      # API health + login + session + conversations smoke testi
+pnpm smoke:local      # API health + login + session + conversations (+ optional realtime) smoke testi
 ```
 
 ## Auth Recovery Baseline
@@ -341,6 +341,7 @@ pnpm dev
     -d '{"text":"Merhaba, kargo nerede?","customerDisplay":"905551112233"}'
   ```
 - Webhook event'leri varsayılan olarak BullMQ ile işlenir; Redis yoksa yalnızca dev modunda inline fallback devreye girer.
+- `GET /events/stream` SSE contract'ı değişmez; `REDIS_URL` varsa backend Redis Pub/Sub ile cross-process fanout yapar, yoksa non-production'da same-process fallback ile çalışır.
 - `NEXT_PUBLIC_*` değişkenleri build-time inline edilir; bu flag build sırasında set edilmelidir.
 - Prod build'lerde `NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS` set etmeyin (veya `false` bırakın), UI görünmez.
 - Tek organization üyeliğinde login sonrası otomatik org seçilir; çoklu üyelikte UI org seçimi ister.
@@ -368,6 +369,24 @@ pnpm dev
 - [docs/ROADMAP.md](docs/ROADMAP.md)
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - [docs/DEVSETUP.md](docs/DEVSETUP.md)
+
+## Opsiyonel Realtime Smoke
+
+İki ayrı API process'i arasında SSE fanout doğrulamak için:
+
+```bash
+# Terminal 1
+PORT=3001 pnpm --filter api dev
+
+# Terminal 2
+PORT=3002 pnpm --filter api dev
+
+# Terminal 3
+SMOKE_REALTIME=1 \
+SMOKE_REALTIME_SSE_API_URL=http://localhost:3001 \
+SMOKE_REALTIME_PUBLISH_API_URL=http://localhost:3002 \
+pnpm smoke:local
+```
 
 ## CI
 
