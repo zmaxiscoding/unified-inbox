@@ -7,6 +7,8 @@ describe("EventsService", () => {
   let transport: EventsTransport;
 
   beforeEach(() => {
+    jest.useRealTimers();
+
     transport = {
       mode: "local",
       publish: jest.fn().mockResolvedValue(undefined),
@@ -140,6 +142,81 @@ describe("EventsService", () => {
         payload: { body: "from another process" },
       },
     ]);
+  });
+
+  it("should retry transport subscription while local subscribers are still connected", async () => {
+    jest.useFakeTimers();
+
+    let fanoutHandler: ((event: SseEvent) => void) | undefined;
+    let subscribeAttempts = 0;
+    transport.subscribe = jest.fn().mockImplementation(
+      async (_organizationId: string, onEvent: (event: SseEvent) => void) => {
+        subscribeAttempts += 1;
+        if (subscribeAttempts === 1) {
+          throw new Error("transient subscribe failure");
+        }
+
+        fanoutHandler = onEvent;
+      },
+    );
+
+    service = new EventsService(transport);
+
+    const received: SseEvent[] = [];
+    const sub = service.subscribe("org_1").subscribe({
+      next: (event) => {
+        received.push(event);
+      },
+    });
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(transport.subscribe).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(1000);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(transport.subscribe).toHaveBeenCalledTimes(2);
+
+    fanoutHandler?.({
+      type: "message.created",
+      conversationId: "conv_retry",
+      payload: { text: "after retry" },
+    });
+
+    sub.unsubscribe();
+    jest.useRealTimers();
+
+    expect(received).toEqual([
+      {
+        type: "message.created",
+        conversationId: "conv_retry",
+        payload: { text: "after retry" },
+      },
+    ]);
+  });
+
+  it("should stop retrying transport subscription after the last subscriber disconnects", async () => {
+    jest.useFakeTimers();
+
+    transport.subscribe = jest.fn().mockRejectedValue(
+      new Error("transient subscribe failure"),
+    );
+    service = new EventsService(transport);
+
+    const sub = service.subscribe("org_1").subscribe();
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    sub.unsubscribe();
+    jest.runOnlyPendingTimers();
+    await Promise.resolve();
+
+    expect(transport.subscribe).toHaveBeenCalledTimes(1);
+    jest.useRealTimers();
   });
 
   it("should clean up transport subscription when last subscriber disconnects", () => {

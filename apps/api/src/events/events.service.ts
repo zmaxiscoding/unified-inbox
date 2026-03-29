@@ -15,9 +15,20 @@ import { LocalOnlyEventsTransport } from "./local-only-events.transport";
 
 @Injectable()
 export class EventsService implements OnModuleDestroy {
+  private readonly transportRetryBaseDelayMs = 1000;
+  private readonly transportRetryMaxDelayMs = 5000;
   private readonly logger = new Logger(EventsService.name);
   private readonly subjects = new Map<string, Subject<SseEvent>>();
   private readonly refCounts = new Map<string, number>();
+  private readonly transportStates = new Map<
+    string,
+    {
+      attempt: number;
+      status: "idle" | "subscribing" | "subscribed";
+      retryTimeout: ReturnType<typeof setTimeout> | null;
+      generation: number;
+    }
+  >();
 
   constructor(
     @Optional()
@@ -27,6 +38,12 @@ export class EventsService implements OnModuleDestroy {
 
   async onModuleDestroy() {
     const activeOrganizations = [...this.subjects.keys()];
+
+    for (const state of this.transportStates.values()) {
+      if (state.retryTimeout) {
+        clearTimeout(state.retryTimeout);
+      }
+    }
 
     for (const [orgId, subject] of this.subjects) {
       subject.complete();
@@ -68,12 +85,7 @@ export class EventsService implements OnModuleDestroy {
           this.subjects.get(organizationId)?.complete();
           this.subjects.delete(organizationId);
           this.refCounts.delete(organizationId);
-
-          void this.transport.unsubscribe(organizationId).catch((error) => {
-            this.logger.warn(
-              `Failed to clean up realtime fanout for org ${organizationId}: ${this.toErrorMessage(error)}`,
-            );
-          });
+          this.teardownTransportSubscription(organizationId);
         } else {
           this.refCounts.set(organizationId, count);
         }
@@ -92,15 +104,100 @@ export class EventsService implements OnModuleDestroy {
   }
 
   private ensureTransportSubscription(organizationId: string) {
+    const state = this.getOrCreateTransportState(organizationId);
+    if (state.status === "subscribed" || state.status === "subscribing") {
+      return;
+    }
+
+    if (state.retryTimeout) {
+      clearTimeout(state.retryTimeout);
+      state.retryTimeout = null;
+    }
+
+    state.status = "subscribing";
+    state.attempt += 1;
+    const generation = state.generation;
+
     void this.transport
       .subscribe(organizationId, (event) => {
         this.publishLocally(organizationId, event);
       })
+      .then(() => {
+        const currentState = this.transportStates.get(organizationId);
+        if (!currentState || currentState.generation !== generation) {
+          void this.transport.unsubscribe(organizationId).catch((error) => {
+            this.logger.warn(
+              `Failed to clean up stale realtime fanout for org ${organizationId}: ${this.toErrorMessage(error)}`,
+            );
+          });
+          return;
+        }
+
+        currentState.status = "subscribed";
+        currentState.attempt = 0;
+      })
       .catch((error) => {
+        const currentState = this.transportStates.get(organizationId);
+        if (!currentState || currentState.generation !== generation) {
+          return;
+        }
+
+        currentState.status = "idle";
         this.logger.warn(
           `Failed to subscribe realtime fanout for org ${organizationId}: ${this.toErrorMessage(error)}`,
         );
+        this.scheduleTransportSubscriptionRetry(organizationId, currentState);
       });
+  }
+
+  private teardownTransportSubscription(organizationId: string) {
+    const state = this.transportStates.get(organizationId);
+    if (state?.retryTimeout) {
+      clearTimeout(state.retryTimeout);
+    }
+
+    if (state) {
+      state.retryTimeout = null;
+      state.status = "idle";
+      state.attempt = 0;
+      state.generation += 1;
+      this.transportStates.delete(organizationId);
+    }
+
+    void this.transport.unsubscribe(organizationId).catch((error) => {
+      this.logger.warn(
+        `Failed to clean up realtime fanout for org ${organizationId}: ${this.toErrorMessage(error)}`,
+      );
+    });
+  }
+
+  private scheduleTransportSubscriptionRetry(
+    organizationId: string,
+    state: {
+      attempt: number;
+      status: "idle" | "subscribing" | "subscribed";
+      retryTimeout: ReturnType<typeof setTimeout> | null;
+      generation: number;
+    },
+  ) {
+    if (!this.subjects.has(organizationId) || !this.hasActiveSubscribers(organizationId)) {
+      return;
+    }
+
+    const retryDelayMs = Math.min(
+      this.transportRetryBaseDelayMs * 2 ** Math.max(state.attempt - 1, 0),
+      this.transportRetryMaxDelayMs,
+    );
+
+    state.retryTimeout = setTimeout(() => {
+      const currentState = this.transportStates.get(organizationId);
+      if (!currentState) {
+        return;
+      }
+
+      currentState.retryTimeout = null;
+      this.ensureTransportSubscription(organizationId);
+    }, retryDelayMs);
   }
 
   private publishLocally(organizationId: string, event: SseEvent) {
@@ -125,5 +222,22 @@ export class EventsService implements OnModuleDestroy {
     }
 
     return String(error);
+  }
+
+  private hasActiveSubscribers(organizationId: string) {
+    return (this.refCounts.get(organizationId) ?? 0) > 0;
+  }
+
+  private getOrCreateTransportState(organizationId: string) {
+    if (!this.transportStates.has(organizationId)) {
+      this.transportStates.set(organizationId, {
+        attempt: 0,
+        status: "idle",
+        retryTimeout: null,
+        generation: 0,
+      });
+    }
+
+    return this.transportStates.get(organizationId)!;
   }
 }

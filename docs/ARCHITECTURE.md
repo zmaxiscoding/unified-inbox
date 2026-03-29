@@ -124,12 +124,12 @@ Idempotency:
 
 ## Test Infrastructure
 
-- 28 test suites, 218 tests (all in `apps/api`)
+- 30 test suites, 279 tests (all in `apps/api`)
 - `apps/web` has typecheck only (no unit/integration tests)
 - CI: `.github/workflows/ci.yml` — lint + test + build on push/PR to main
 - Local smoke: `scripts/smoke-local.sh` — health → login → session → conversations, plus optional SSE fanout validation
 
 ## Current Gaps
 
-- Real email provider transport and optional hard enforcement of verified email are not implemented yet
+- Auth email transport baseline is implemented (`disabled|outbox|resend`), but stricter verified-email enforcement rollout is still optional/config-driven
 - MFA is not implemented yet
