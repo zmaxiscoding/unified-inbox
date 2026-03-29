@@ -1,4 +1,5 @@
 import { ConflictException } from "@nestjs/common";
+import { CryptoService } from "../crypto/crypto.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { ChannelsService } from "./channels.service";
 
@@ -39,7 +40,11 @@ describe("ChannelsService", () => {
       }),
     };
 
-    service = new ChannelsService(prisma as unknown as PrismaService);
+    const crypto = { encrypt: jest.fn((v: string) => v), decrypt: jest.fn((v: string) => v) };
+    service = new ChannelsService(
+      prisma as unknown as PrismaService,
+      crypto as unknown as CryptoService,
+    );
   });
 
   it("should list channels without access tokens", async () => {

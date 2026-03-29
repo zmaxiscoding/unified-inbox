@@ -1,11 +1,11 @@
 import { CryptoService } from "../crypto/crypto.service";
 import { PrismaService } from "../prisma/prisma.service";
-import { WhatsAppCloudApiAdapter } from "./whatsapp-cloud-api.adapter";
+import { InstagramGraphApiAdapter } from "./instagram-graph-api.adapter";
 
-describe("WhatsAppCloudApiAdapter", () => {
+describe("InstagramGraphApiAdapter", () => {
   const originalFetch = global.fetch;
 
-  let service: WhatsAppCloudApiAdapter;
+  let service: InstagramGraphApiAdapter;
   let prisma: {
     channelAccount: {
       findFirst: jest.Mock;
@@ -23,7 +23,7 @@ describe("WhatsAppCloudApiAdapter", () => {
       decrypt: jest.fn((v: string) => v),
     };
 
-    service = new WhatsAppCloudApiAdapter(
+    service = new InstagramGraphApiAdapter(
       prisma as unknown as PrismaService,
       crypto as unknown as CryptoService,
     );
@@ -34,41 +34,48 @@ describe("WhatsAppCloudApiAdapter", () => {
     jest.restoreAllMocks();
   });
 
-  it("should send text via WhatsApp Cloud API and return provider message id", async () => {
-    prisma.channelAccount.findFirst.mockResolvedValue({ accessToken: "test-token" });
+  it("should send text via Instagram Send API and return provider message id", async () => {
+    prisma.channelAccount.findFirst.mockResolvedValue({ accessToken: "ig-test-token" });
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
       text: jest.fn().mockResolvedValue(
         JSON.stringify({
-          messaging_product: "whatsapp",
-          messages: [{ id: "wamid.abc123" }],
+          message_id: "mid.ig_abc123",
         }),
       ),
     }) as unknown as typeof fetch;
 
     const result = await service.sendTextMessage({
       organizationId: "org_1",
-      phoneNumberId: "12345",
-      to: "905551112233",
-      text: "Merhaba",
+      instagramAccountId: "ig_12345",
+      recipientId: "user_67890",
+      text: "Merhaba Instagram",
     });
 
-    expect(result).toEqual({ providerMessageId: "wamid.abc123" });
+    expect(result).toEqual({ providerMessageId: "mid.ig_abc123" });
     expect(global.fetch).toHaveBeenCalledWith(
-      "https://graph.facebook.com/v21.0/12345/messages",
+      "https://graph.instagram.com/v21.0/me/messages",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({
-          Authorization: "Bearer test-token",
+          Authorization: "Bearer ig-test-token",
           "Content-Type": "application/json",
         }),
       }),
     );
+
+    const callBody = JSON.parse(
+      (global.fetch as jest.Mock).mock.calls[0][1].body,
+    );
+    expect(callBody).toEqual({
+      recipient: { id: "user_67890" },
+      message: { text: "Merhaba Instagram" },
+    });
   });
 
   it("should not leak access token in provider error message", async () => {
-    prisma.channelAccount.findFirst.mockResolvedValue({ accessToken: "very-secret-token" });
+    prisma.channelAccount.findFirst.mockResolvedValue({ accessToken: "very-secret-ig-token" });
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
       status: 400,
@@ -85,8 +92,8 @@ describe("WhatsAppCloudApiAdapter", () => {
     try {
       await service.sendTextMessage({
         organizationId: "org_1",
-        phoneNumberId: "12345",
-        to: "905551112233",
+        instagramAccountId: "ig_12345",
+        recipientId: "user_67890",
         text: "Merhaba",
       });
     } catch (error) {
@@ -94,8 +101,8 @@ describe("WhatsAppCloudApiAdapter", () => {
     }
 
     expect(thrown).not.toBeNull();
-    expect(thrown?.message).toContain("WhatsApp API error (400): Invalid parameter");
-    expect(thrown?.message).not.toContain("very-secret-token");
+    expect(thrown?.message).toContain("Instagram API error (400): Invalid parameter");
+    expect(thrown?.message).not.toContain("very-secret-ig-token");
   });
 
   it("should throw when channel account mapping is missing", async () => {
@@ -104,10 +111,28 @@ describe("WhatsAppCloudApiAdapter", () => {
     await expect(
       service.sendTextMessage({
         organizationId: "org_1",
-        phoneNumberId: "12345",
-        to: "905551112233",
+        instagramAccountId: "ig_12345",
+        recipientId: "user_67890",
         text: "Merhaba",
       }),
-    ).rejects.toThrow("WhatsApp channel account not found for conversation");
+    ).rejects.toThrow("Instagram channel account not found for conversation");
+  });
+
+  it("should throw when response has no message_id", async () => {
+    prisma.channelAccount.findFirst.mockResolvedValue({ accessToken: "ig-token" });
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: jest.fn().mockResolvedValue(JSON.stringify({})),
+    }) as unknown as typeof fetch;
+
+    await expect(
+      service.sendTextMessage({
+        organizationId: "org_1",
+        instagramAccountId: "ig_12345",
+        recipientId: "user_67890",
+        text: "Merhaba",
+      }),
+    ).rejects.toThrow("Instagram send response is missing message_id");
   });
 });

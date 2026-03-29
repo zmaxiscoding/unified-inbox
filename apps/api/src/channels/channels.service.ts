@@ -4,6 +4,7 @@ import {
   Injectable,
 } from "@nestjs/common";
 import { ChannelType } from "@prisma/client";
+import { CryptoService } from "../crypto/crypto.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { ConnectInstagramChannelDto } from "./dto/connect-instagram-channel.dto";
 import { ConnectWhatsAppChannelDto } from "./dto/connect-whatsapp-channel.dto";
@@ -19,7 +20,10 @@ type ChannelAccountListItem = {
 
 @Injectable()
 export class ChannelsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly crypto: CryptoService,
+  ) {}
 
   async listChannels(organizationId: string) {
     const accounts = await this.prisma.channelAccount.findMany({
@@ -66,8 +70,7 @@ export class ChannelsService {
             organizationId,
             provider: ChannelType.WHATSAPP,
             externalAccountId: phoneNumberId,
-            // TODO(encrypt): persist encrypted token instead of plaintext.
-            accessToken,
+            accessToken: this.crypto.encrypt(accessToken),
             displayPhoneNumber,
             wabaId,
           },
@@ -156,8 +159,7 @@ export class ChannelsService {
             organizationId,
             provider: ChannelType.INSTAGRAM,
             externalAccountId: instagramAccountId,
-            // TODO(encrypt): persist encrypted token instead of plaintext.
-            accessToken,
+            accessToken: this.crypto.encrypt(accessToken),
             displayPhoneNumber: displayName,
           },
           select: {

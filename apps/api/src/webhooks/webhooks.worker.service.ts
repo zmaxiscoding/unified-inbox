@@ -6,6 +6,7 @@ import {
   Prisma,
   WebhookProcessingStatus,
 } from "@prisma/client";
+import { EventsService } from "../events/events.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { extractInstagramTextMessage } from "./instagram-payload";
 import {
@@ -25,7 +26,10 @@ type RawWebhookEventRecord = {
 
 @Injectable()
 export class WebhooksWorkerService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly eventsService: EventsService,
+  ) {}
 
   async processRawEvent(rawWebhookEventId: string) {
     const rawEvent = await this.prisma.rawWebhookEvent.findUnique({
@@ -68,9 +72,10 @@ export class WebhooksWorkerService {
         return;
       }
 
+      let inboundConversationId: string | null = null;
       await this.prisma.$transaction(async (tx) => {
         if (normalizedMessage) {
-          await this.persistInboundMessage(tx, rawEvent, normalizedMessage);
+          inboundConversationId = await this.persistInboundMessage(tx, rawEvent, normalizedMessage);
         }
 
         for (const statusUpdate of statusUpdates) {
@@ -90,6 +95,26 @@ export class WebhooksWorkerService {
           },
         });
       });
+
+      if (inboundConversationId && normalizedMessage) {
+        this.eventsService.emit(rawEvent.organizationId, {
+          type: "message.created",
+          conversationId: inboundConversationId,
+          payload: {
+            direction: "INBOUND",
+            text: normalizedMessage.text,
+            senderDisplay: normalizedMessage.customerDisplay,
+          },
+        });
+        this.eventsService.emit(rawEvent.organizationId, {
+          type: "conversation.updated",
+          conversationId: inboundConversationId,
+          payload: {
+            action: "newInboundMessage",
+            lastMessageText: normalizedMessage.text,
+          },
+        });
+      }
     } catch (error) {
       await this.prisma.rawWebhookEvent.update({
         where: { id: rawWebhookEventId },
@@ -112,7 +137,7 @@ export class WebhooksWorkerService {
       externalThreadId: string;
       customerDisplay: string;
     },
-  ) {
+  ): Promise<string | null> {
     const channelName = rawEvent.provider === ChannelType.INSTAGRAM
       ? "Instagram Business"
       : "WhatsApp Business";
@@ -144,7 +169,6 @@ export class WebhooksWorkerService {
       normalizedMessage.customerDisplay,
     );
 
-    let createdAt: Date | null = null;
     try {
       const createdMessage = await tx.message.create({
         data: {
@@ -156,23 +180,25 @@ export class WebhooksWorkerService {
         select: { createdAt: true },
       });
 
-      createdAt = createdMessage.createdAt;
-    } catch (error) {
-      if (!this.isUniqueConstraintError(error)) {
-        throw error;
-      }
-    }
+      await tx.conversation.update({
+        where: { id: conversation.id },
+        data: {
+          contactName: normalizedMessage.customerDisplay,
+          contactPhone: normalizedMessage.from,
+          lastMessageAt: createdMessage.createdAt,
+          lastMessageText: normalizedMessage.text,
+          isUnread: true,
+        },
+      });
 
-    await tx.conversation.update({
-      where: { id: conversation.id },
-      data: {
-        contactName: normalizedMessage.customerDisplay,
-        contactPhone: normalizedMessage.from,
-        lastMessageAt: createdAt ?? new Date(),
-        lastMessageText: normalizedMessage.text,
-        isUnread: true,
-      },
-    });
+      return conversation.id;
+    } catch (error) {
+      if (this.isUniqueConstraintError(error)) {
+        // Duplicate providerMessageId — true no-op: skip conversation update and SSE events
+        return null;
+      }
+      throw error;
+    }
   }
 
   private async applyOutboundStatusUpdate(

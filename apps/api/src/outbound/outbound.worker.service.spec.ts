@@ -1,4 +1,5 @@
 import { PrismaService } from "../prisma/prisma.service";
+import { InstagramGraphApiAdapter } from "./instagram-graph-api.adapter";
 import { OutboundWorkerService } from "./outbound.worker.service";
 import { WhatsAppCloudApiAdapter } from "./whatsapp-cloud-api.adapter";
 
@@ -11,7 +12,10 @@ describe("OutboundWorkerService", () => {
       update: jest.Mock;
     };
   };
-  let adapter: {
+  let whatsappAdapter: {
+    sendTextMessage: jest.Mock;
+  };
+  let instagramAdapter: {
     sendTextMessage: jest.Mock;
   };
 
@@ -24,13 +28,18 @@ describe("OutboundWorkerService", () => {
       },
     };
 
-    adapter = {
+    whatsappAdapter = {
+      sendTextMessage: jest.fn(),
+    };
+
+    instagramAdapter = {
       sendTextMessage: jest.fn(),
     };
 
     service = new OutboundWorkerService(
       prisma as unknown as PrismaService,
-      adapter as unknown as WhatsAppCloudApiAdapter,
+      whatsappAdapter as unknown as WhatsAppCloudApiAdapter,
+      instagramAdapter as unknown as InstagramGraphApiAdapter,
     );
   });
 
@@ -49,7 +58,7 @@ describe("OutboundWorkerService", () => {
         },
       },
     });
-    adapter.sendTextMessage.mockResolvedValue({ providerMessageId: "wamid.abc123" });
+    whatsappAdapter.sendTextMessage.mockResolvedValue({ providerMessageId: "wamid.abc123" });
     prisma.message.update.mockResolvedValue({});
 
     await service.processOutboundMessage("msg_1");
@@ -69,7 +78,7 @@ describe("OutboundWorkerService", () => {
         failedAt: null,
       },
     });
-    expect(adapter.sendTextMessage).toHaveBeenCalledWith({
+    expect(whatsappAdapter.sendTextMessage).toHaveBeenCalledWith({
       organizationId: "org_1",
       phoneNumberId: "12345",
       to: "905551112233",
@@ -94,7 +103,7 @@ describe("OutboundWorkerService", () => {
     await service.processOutboundMessage("msg_2");
 
     expect(prisma.message.findUnique).not.toHaveBeenCalled();
-    expect(adapter.sendTextMessage).not.toHaveBeenCalled();
+    expect(whatsappAdapter.sendTextMessage).not.toHaveBeenCalled();
     expect(prisma.message.update).not.toHaveBeenCalled();
   });
 
@@ -115,7 +124,7 @@ describe("OutboundWorkerService", () => {
         },
       },
     });
-    adapter.sendTextMessage.mockRejectedValue(new Error("provider timeout"));
+    whatsappAdapter.sendTextMessage.mockRejectedValue(new Error("provider timeout"));
 
     await expect(service.processOutboundMessage("msg_3")).rejects.toThrow(
       "provider timeout",

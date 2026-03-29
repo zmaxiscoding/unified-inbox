@@ -16,24 +16,26 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 - DB schema is up to date: `pnpm db:migrate`
 - Seed runs and provides demo data: `pnpm db:seed` (1 org, 2 users, conversations, tags, notes, invites, audit logs)
 - Lint passes: `pnpm lint`
-- Tests pass: `pnpm test` -> **23 suites, 178 tests passed**
+- Tests pass: `pnpm test`
 - Build passes: `pnpm build` (web + api)
 - One-command bootstrap: `pnpm demo:local` reaches `install -> setup -> migrate -> seed -> dev`
 - Smoke script: `scripts/smoke-local.sh` covers health -> login -> session -> conversations
 - Webhook pipeline: `persist -> queue -> worker` (WhatsApp + Instagram inbound)
 - Conversation resolve/reopen: API + UI + audit logging complete
 - Audit log web UI route is present in app: `/settings/audit-log`
+- SSE realtime updates: `GET /events/stream` pushes org-scoped events to inbox UI
+- Instagram outbound: send parity with WhatsApp via Instagram Graph API adapter
+- Token encryption: channel access tokens encrypted at rest; `CHANNEL_TOKEN_SECRET` required in production (fail-fast)
+- SSE limitation: process-local only; does not work across multiple API instances or separate worker processes
 
 ## What Is Broken or Missing
 
-1. MVP feature gaps:
-   - Realtime push (WS/SSE) yok; UI manual refresh patterninde.
-   - Instagram outbound gönderim yok (WhatsApp outbound var).
-2. Real provider end-to-end verification:
-   - WhatsApp/Instagram live send-receive doğrulaması gerçek provider credentials gerektiriyor.
-3. Security gaps:
-   - Channel access tokens plaintext saklanıyor (`TODO(encrypt)`).
-   - Auth email-only demo login; production-grade auth yok.
+1. Real provider end-to-end verification:
+   - WhatsApp/Instagram live send-receive requires real provider credentials.
+2. Security gaps:
+   - Auth email-only demo login; production-grade auth not yet implemented.
+3. Scalability:
+   - SSE realtime bus is in-memory; needs Redis Pub/Sub for multi-process deployments.
 
 ## MVP Checklist
 
@@ -46,22 +48,23 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 | 5 | Inbox list + conversation messages + outbound reply | Done | Endpoints + web inbox UI functional |
 | 6 | Conversation resolve/reopen | Done | API + UI + audit logging + optimistic rollback |
 | 7 | Webhook ingestion (`persist -> queue -> worker`) | Done | WhatsApp + Instagram inbound normalization |
-| 8 | Outbound queue + delivery status tracking | Partial | WhatsApp send + status webhook var, Instagram outbound yok |
+| 8 | Outbound queue + delivery status tracking | Done | WhatsApp + Instagram send via adapters, status webhook reconciliation |
 | 9 | Channel connect settings | Done | WhatsApp + Instagram connect UI/API complete |
 |10 | Auditability (audit log API) | Done | Cursor pagination + filters + owner-only access |
-|11 | Audit log web UI | Done | Web route/page present |
+|11 | Audit log web UI | Done | Web route/page present with filters + cursor pagination |
 |12 | Inbox filters + search | Done | Status/channel/assignee/tag + text search |
-|13 | Realtime updates (SSE/WS) | Missing | Polling only |
+|13 | Realtime updates (SSE) | Done | SSE stream at `/events/stream`, org-scoped, auto-reconnect client |
 |14 | Reproducible local demo | Done | `pnpm demo:local` + `pnpm smoke:local` + Node20 enforcement |
+|15 | Token encryption at rest | Done | AES-256-GCM via `CHANNEL_TOKEN_SECRET`; graceful degradation if unset |
 
 ## MVP Progress
 
-Estimated MVP progress: **85%**
+Estimated MVP progress: **95%**
 
 Rationale:
-- Core backend domain, ingestion pipeline, conversation lifecycle, filters/search, and audit log UI are complete.
+- All core backend domain, ingestion pipeline, conversation lifecycle, filters/search, audit log UI, realtime SSE, Instagram outbound, and token encryption are complete.
 - Bootstrap reproducibility is solid with runtime checks, smoke script, CI smoke, and one-command local demo.
-- Remaining value gaps are realtime updates, Instagram outbound, token encryption, and stronger auth.
+- Remaining gap: production-grade auth (currently email-only demo login).
 
 ## Single Roadmap + Todo System
 
@@ -74,16 +77,16 @@ Use this as the single source of truth, with milestones in [ROADMAP.md](./ROADMA
 - [x] Add inbox filters (channel/status/assignee/tag) and basic search
 - [x] Add Instagram connect form in settings UI
 - [x] Add audit log web UI
+- [x] Add SSE-based realtime update mechanism for inbox
+- [x] Add Instagram outbound sending + delivery parity
+- [x] Encrypt provider access tokens at rest (AES-256-GCM)
 
 ### Next (P1)
 
-- [ ] Add realtime delivery path (SSE or WebSocket) for new inbound/outbound updates
-- [ ] Add Instagram outbound sending + delivery parity
-- [ ] Add provider secret/token encryption for channel credentials
+- [ ] Improve auth model beyond email-only demo login
 
 ### Later (P2)
 
-- [ ] Improve auth model beyond email-only demo login
 - [ ] Performance pass for inbox list on larger datasets
 - [ ] Reporting/analytics baseline
 - [ ] Production deployment guide and runbooks

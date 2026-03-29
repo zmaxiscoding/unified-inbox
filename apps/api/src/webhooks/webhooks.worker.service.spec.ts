@@ -1,3 +1,4 @@
+import { EventsService } from "../events/events.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { WebhooksWorkerService } from "./webhooks.worker.service";
 
@@ -60,7 +61,11 @@ describe("WebhooksWorkerService", () => {
       }),
     };
 
-    service = new WebhooksWorkerService(prisma as unknown as PrismaService);
+    const eventsService = { emit: jest.fn() } as unknown as EventsService;
+    service = new WebhooksWorkerService(
+      prisma as unknown as PrismaService,
+      eventsService,
+    );
   });
 
   it("should update outbound message when delivered status webhook arrives", async () => {
@@ -208,6 +213,63 @@ describe("WebhooksWorkerService", () => {
         deliveryStatusUpdatedAt: expect.any(Date),
         failedAt: expect.any(Date),
         providerError: "Recipient is not on WhatsApp",
+      },
+    });
+  });
+
+  // ─── Duplicate Inbound Idempotency ──────────────────────
+
+  it("should skip conversation update and SSE events on duplicate inbound message", async () => {
+    prisma.rawWebhookEvent.findUnique.mockResolvedValue({
+      ...BASE_RAW_EVENT,
+      payload: {
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  metadata: { phone_number_id: "12345" },
+                  contacts: [{ wa_id: "905551112233", profile: { name: "Ali" } }],
+                  messages: [
+                    {
+                      id: "wamid.dup_1",
+                      from: "905551112233",
+                      type: "text",
+                      text: { body: "duplicate msg" },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    prisma.channel.upsert.mockResolvedValue({ id: "ch_1" });
+    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    // message.create throws P2002 — duplicate providerMessageId
+    prisma.message.create.mockRejectedValue({ code: "P2002" });
+    prisma.rawWebhookEvent.update.mockResolvedValue({});
+
+    const eventsService = { emit: jest.fn() } as unknown as EventsService;
+    const svc = new WebhooksWorkerService(
+      prisma as unknown as PrismaService,
+      eventsService,
+    );
+
+    await svc.processRawEvent("rwe_1");
+
+    // Conversation must NOT be updated on duplicate
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+    // SSE events must NOT be emitted on duplicate
+    expect(eventsService.emit).not.toHaveBeenCalled();
+    // Raw event should still be marked as processed
+    expect(prisma.rawWebhookEvent.update).toHaveBeenCalledWith({
+      where: { id: "rwe_1" },
+      data: {
+        processingStatus: "PROCESSED",
+        processedAt: expect.any(Date),
+        error: null,
       },
     });
   });

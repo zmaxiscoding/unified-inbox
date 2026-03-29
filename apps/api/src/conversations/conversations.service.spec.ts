@@ -2,6 +2,7 @@ import {
   BadRequestException,
   NotFoundException,
 } from "@nestjs/common";
+import { EventsService } from "../events/events.service";
 import { OutboundQueueService } from "../outbound/outbound.queue.service";
 import { PrismaService } from "../prisma/prisma.service";
 import { ConversationsService } from "./conversations.service";
@@ -90,9 +91,11 @@ describe("ConversationsService", () => {
       enqueue: jest.fn(),
     };
 
+    const eventsService = { emit: jest.fn() } as unknown as EventsService;
     service = new ConversationsService(
       prisma as unknown as PrismaService,
       outboundQueue as unknown as OutboundQueueService,
+      eventsService,
     );
   });
 
