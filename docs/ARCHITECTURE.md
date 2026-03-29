@@ -8,7 +8,7 @@ Updated: 2026-03-29 (UTC)
   - Login, Inbox (with resolve/reopen), Team Settings, Channel Settings
   - `/api/*` requests are proxied to API via Next rewrites
 - `apps/api`: NestJS backend
-  - Auth/session, team ops, conversations (CRUD + status lifecycle), channels, webhooks, audit logs
+  - Auth/session, team ops, conversations (CRUD + status lifecycle), channels, webhooks, audit logs, SSE events, token encryption
 - PostgreSQL 16
   - System of record for tenants, users, memberships, channels, conversations/messages, tags/notes, invites, audit logs, raw webhooks
 - Redis 7 + BullMQ
@@ -54,11 +54,28 @@ Idempotency:
 2. API creates outbound `Message` with `deliveryStatus=QUEUED`
 3. API enqueues message id to outbound queue
 4. Worker claims message (`SENDING`) atomically
-5. Worker calls WhatsApp Cloud API adapter
+5. Worker routes to WhatsApp Cloud API adapter or Instagram Graph API adapter based on channel type
 6. Message updates to `SENT` / `FAILED`
 7. Provider status webhooks update `DELIVERED` / `READ` / `FAILED`
 
-Note: Instagram outbound adapter is not yet implemented (inbound parity exists).
+## Realtime Updates (SSE)
+
+- `GET /events/stream` — Server-Sent Events endpoint, session-authenticated
+- Events are org-scoped: clients only receive events for their `organizationId`
+- Event types: `message.created`, `conversation.updated`, `note.created`
+- Backend: `EventsService` uses rxjs `Subject` per org, auto-cleans when no subscribers
+- **Limitation**: process-local only — if BullMQ workers or additional API instances run in separate processes, their events won't reach SSE clients. Scale path: Redis Pub/Sub transport.
+- Frontend: `EventSource` with auto-reconnect (3s delay), connection status indicator (green/amber/grey dot)
+- Integration points: conversations service, webhook worker emit events after mutations
+
+## Token Encryption
+
+- Channel access tokens are encrypted at rest using AES-256-GCM
+- Encryption key derived from `CHANNEL_TOKEN_SECRET` env var via scrypt
+- Non-deterministic: each encryption produces different ciphertext (random IV)
+- Legacy plaintext tokens are handled gracefully on decrypt (no `enc:` prefix = passthrough)
+- If `CHANNEL_TOKEN_SECRET` is not set in production, the app fails fast on startup
+- In non-production environments, encryption is disabled with a warning when the secret is absent
 
 ## Key DB-Level Guarantees
 
@@ -77,7 +94,4 @@ Note: Instagram outbound adapter is not yet implemented (inbound parity exists).
 
 ## Current Gaps
 
-- Realtime push channel for UI updates is not implemented (polling only)
-- Instagram outbound adapter not implemented (inbound parity exists)
-- Audit log web UI not implemented (API ready)
-- Channel access tokens stored in plaintext (`TODO(encrypt)`)
+- Auth is email-only demo login; production-grade auth not yet implemented

@@ -10,6 +10,7 @@ import {
   OutboundMessageDeliveryStatus,
   Prisma,
 } from "@prisma/client";
+import { EventsService } from "../events/events.service";
 import { ListConversationsQueryDto } from "./dto/list-conversations-query.dto";
 import { OutboundQueueService } from "../outbound/outbound.queue.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -46,6 +47,7 @@ export class ConversationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly outboundQueue: OutboundQueueService,
+    private readonly eventsService: EventsService,
   ) {}
 
   async listConversations(
@@ -245,7 +247,13 @@ export class ConversationsService {
       throw new InternalServerErrorException("Outbound message enqueue failed");
     }
 
-    return this.toMessageResponse(message);
+    const response = this.toMessageResponse(message);
+    this.eventsService.emit(organizationId, {
+      type: "message.created",
+      conversationId,
+      payload: response as unknown as Record<string, unknown>,
+    });
+    return response;
   }
 
   async assignConversation(
@@ -320,7 +328,7 @@ export class ConversationsService {
       },
     });
 
-    return {
+    const result = {
       id: updatedConversation.id,
       assignedMembership: updatedConversation.assignedMembership
         ? {
@@ -333,6 +341,12 @@ export class ConversationsService {
           }
         : null,
     };
+    this.eventsService.emit(organizationId, {
+      type: "conversation.updated",
+      conversationId,
+      payload: { action: membershipId === null ? "unassigned" : "assigned", ...result },
+    });
+    return result;
   }
 
   async updateConversationStatus(
@@ -341,7 +355,7 @@ export class ConversationsService {
     conversationId: string,
     status: "OPEN" | "RESOLVED",
   ) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const conversation = await tx.conversation.findFirst({
         where: {
           id: conversationId,
@@ -394,6 +408,13 @@ export class ConversationsService {
         status: updatedConversation.status,
       };
     });
+
+    this.eventsService.emit(organizationId, {
+      type: "conversation.updated",
+      conversationId,
+      payload: { action: "statusChanged", id: result.id, status: result.status },
+    });
+    return result;
   }
 
   async listConversationNotes(
@@ -457,7 +478,7 @@ export class ConversationsService {
       },
     });
 
-    return {
+    const noteResponse = {
       id: note.id,
       body: note.body,
       createdAt: note.createdAt,
@@ -467,6 +488,12 @@ export class ConversationsService {
         email: note.author.email,
       },
     };
+    this.eventsService.emit(organizationId, {
+      type: "note.created",
+      conversationId,
+      payload: noteResponse as unknown as Record<string, unknown>,
+    });
+    return noteResponse;
   }
 
   async listConversationTags(
@@ -520,6 +547,11 @@ export class ConversationsService {
       create: { conversationId: conversation.id, tagId: tag.id },
     });
 
+    this.eventsService.emit(organizationId, {
+      type: "conversation.updated",
+      conversationId,
+      payload: { action: "tagAdded", tagId: tag.id, tagName: tag.name },
+    });
     return { id: tag.id, name: tag.name };
   }
 
@@ -553,6 +585,12 @@ export class ConversationsService {
           tagId,
         },
       },
+    });
+
+    this.eventsService.emit(organizationId, {
+      type: "conversation.updated",
+      conversationId,
+      payload: { action: "tagRemoved", tagId },
     });
   }
 

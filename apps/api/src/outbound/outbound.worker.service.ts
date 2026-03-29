@@ -5,6 +5,7 @@ import {
   OutboundMessageDeliveryStatus,
 } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { InstagramGraphApiAdapter } from "./instagram-graph-api.adapter";
 import { WhatsAppCloudApiAdapter } from "./whatsapp-cloud-api.adapter";
 
 type OutboundMessageRecord = {
@@ -26,6 +27,7 @@ export class OutboundWorkerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly whatsappCloudApiAdapter: WhatsAppCloudApiAdapter,
+    private readonly instagramGraphApiAdapter: InstagramGraphApiAdapter,
   ) {}
 
   async processOutboundMessage(messageId: string) {
@@ -87,26 +89,42 @@ export class OutboundWorkerService {
   }
 
   private async sendViaProvider(outboundMessage: OutboundMessageRecord) {
-    if (outboundMessage.conversation.channel.type !== ChannelType.WHATSAPP) {
-      throw new Error("Unsupported outbound channel provider");
+    const channelType = outboundMessage.conversation.channel.type;
+    const externalId = outboundMessage.conversation.channel.externalId?.trim() || "";
+
+    if (!externalId) {
+      throw new Error("Channel external id is missing");
     }
 
-    const to = outboundMessage.conversation.contactPhone?.trim() || "";
-    if (!to) {
-      throw new Error("Conversation contact phone is missing");
-    }
+    let sendResult: { providerMessageId: string };
 
-    const phoneNumberId = outboundMessage.conversation.channel.externalId?.trim() || "";
-    if (!phoneNumberId) {
-      throw new Error("WhatsApp channel external id is missing");
-    }
+    if (channelType === ChannelType.WHATSAPP) {
+      const to = outboundMessage.conversation.contactPhone?.trim() || "";
+      if (!to) {
+        throw new Error("Conversation contact phone is missing");
+      }
 
-    const sendResult = await this.whatsappCloudApiAdapter.sendTextMessage({
-      organizationId: outboundMessage.conversation.organizationId,
-      phoneNumberId,
-      to,
-      text: outboundMessage.body,
-    });
+      sendResult = await this.whatsappCloudApiAdapter.sendTextMessage({
+        organizationId: outboundMessage.conversation.organizationId,
+        phoneNumberId: externalId,
+        to,
+        text: outboundMessage.body,
+      });
+    } else if (channelType === ChannelType.INSTAGRAM) {
+      const recipientId = outboundMessage.conversation.contactPhone?.trim() || "";
+      if (!recipientId) {
+        throw new Error("Conversation contact (Instagram recipient) is missing");
+      }
+
+      sendResult = await this.instagramGraphApiAdapter.sendTextMessage({
+        organizationId: outboundMessage.conversation.organizationId,
+        instagramAccountId: externalId,
+        recipientId,
+        text: outboundMessage.body,
+      });
+    } else {
+      throw new Error(`Unsupported outbound channel provider: ${channelType}`);
+    }
 
     const sentAt = new Date();
     await this.prisma.message.update({

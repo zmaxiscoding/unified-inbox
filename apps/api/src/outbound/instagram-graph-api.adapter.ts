@@ -3,14 +3,14 @@ import { ChannelType } from "@prisma/client";
 import { CryptoService } from "../crypto/crypto.service";
 import { PrismaService } from "../prisma/prisma.service";
 
-type SendWhatsAppTextInput = {
+type SendInstagramTextInput = {
   organizationId: string;
-  phoneNumberId: string;
-  to: string;
+  instagramAccountId: string;
+  recipientId: string;
   text: string;
 };
 
-type SendWhatsAppTextResult = {
+type SendInstagramTextResult = {
   providerMessageId: string;
 };
 
@@ -30,18 +30,18 @@ function readNonEmptyString(value: unknown): string | null {
 }
 
 @Injectable()
-export class WhatsAppCloudApiAdapter {
+export class InstagramGraphApiAdapter {
   constructor(
     private readonly prisma: PrismaService,
     private readonly crypto: CryptoService,
   ) {}
 
-  async sendTextMessage(input: SendWhatsAppTextInput): Promise<SendWhatsAppTextResult> {
+  async sendTextMessage(input: SendInstagramTextInput): Promise<SendInstagramTextResult> {
     const channelAccount = await this.prisma.channelAccount.findFirst({
       where: {
         organizationId: input.organizationId,
-        provider: ChannelType.WHATSAPP,
-        externalAccountId: input.phoneNumberId,
+        provider: ChannelType.INSTAGRAM,
+        externalAccountId: input.instagramAccountId,
       },
       select: {
         accessToken: true,
@@ -49,11 +49,11 @@ export class WhatsAppCloudApiAdapter {
     });
 
     if (!channelAccount) {
-      throw new Error("WhatsApp channel account not found for conversation");
+      throw new Error("Instagram channel account not found for conversation");
     }
 
-    const apiVersion = process.env.WHATSAPP_GRAPH_API_VERSION?.trim() || "v21.0";
-    const endpoint = `https://graph.facebook.com/${apiVersion}/${input.phoneNumberId}/messages`;
+    const apiVersion = process.env.INSTAGRAM_GRAPH_API_VERSION?.trim() || "v21.0";
+    const endpoint = `https://graph.instagram.com/${apiVersion}/me/messages`;
 
     const decryptedToken = this.crypto.decrypt(channelAccount.accessToken);
 
@@ -64,12 +64,11 @@ export class WhatsAppCloudApiAdapter {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
-        to: input.to,
-        type: "text",
-        text: {
-          body: input.text,
+        recipient: {
+          id: input.recipientId,
+        },
+        message: {
+          text: input.text,
         },
       }),
     });
@@ -83,7 +82,7 @@ export class WhatsAppCloudApiAdapter {
 
     const providerMessageId = this.extractProviderMessageId(responseBody);
     if (!providerMessageId) {
-      throw new Error("WhatsApp send response is missing messages[0].id");
+      throw new Error("Instagram send response is missing message_id");
     }
 
     return { providerMessageId };
@@ -106,16 +105,10 @@ export class WhatsAppCloudApiAdapter {
       return null;
     }
 
-    const messages = Array.isArray(payload.messages) ? payload.messages : [];
-    for (const message of messages) {
-      if (!isPlainObject(message)) {
-        continue;
-      }
-
-      const providerMessageId = readNonEmptyString(message.id);
-      if (providerMessageId) {
-        return providerMessageId;
-      }
+    // Instagram Send API returns { message_id: "..." }
+    const messageId = readNonEmptyString(payload.message_id);
+    if (messageId) {
+      return messageId;
     }
 
     return null;
@@ -125,10 +118,10 @@ export class WhatsAppCloudApiAdapter {
     if (isPlainObject(payload) && isPlainObject(payload.error)) {
       const providerMessage = readNonEmptyString(payload.error.message);
       if (providerMessage) {
-        return `WhatsApp API error (${statusCode}): ${providerMessage}`.slice(0, 500);
+        return `Instagram API error (${statusCode}): ${providerMessage}`.slice(0, 500);
       }
     }
 
-    return `WhatsApp API error (${statusCode})`;
+    return `Instagram API error (${statusCode})`;
   }
 }

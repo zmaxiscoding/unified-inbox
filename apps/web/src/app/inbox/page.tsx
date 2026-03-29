@@ -153,6 +153,7 @@ export default function InboxPage() {
   const [isSending, setIsSending] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [sseStatus, setSseStatus] = useState<"connecting" | "connected" | "disconnected">("disconnected");
   const [filterStatus, setFilterStatus] = useState("");
   const [filterChannel, setFilterChannel] = useState("");
   const [filterAssignee, setFilterAssignee] = useState("");
@@ -403,6 +404,89 @@ export default function InboxPage() {
     void fetchMessages(selectedConversationId);
     void fetchNotes(selectedConversationId);
   }, [fetchMessages, fetchNotes, selectedConversationId]);
+
+  // SSE realtime connection
+  useEffect(() => {
+    if (isCheckingSession || !session) return;
+
+    let es: EventSource | null = null;
+    let retryTimeout: ReturnType<typeof setTimeout> | null = null;
+    let disposed = false;
+
+    const connect = () => {
+      if (disposed) return;
+      setSseStatus("connecting");
+      es = new EventSource("/api/events/stream");
+
+      es.onopen = () => {
+        if (!disposed) setSseStatus("connected");
+      };
+
+      es.addEventListener("message.created", (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as {
+            conversationId: string;
+            payload: Record<string, unknown>;
+          };
+          const currentId = activeConversationRef.current;
+          if (currentId === data.conversationId) {
+            void fetchMessages(currentId);
+          }
+          void fetchConversations();
+        } catch {
+          // ignore parse errors
+        }
+      });
+
+      es.addEventListener("conversation.updated", (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as {
+            conversationId: string;
+            payload: { action: string };
+          };
+          void fetchConversations();
+          const currentId = activeConversationRef.current;
+          if (currentId === data.conversationId) {
+            void fetchMessages(currentId);
+            if (data.payload.action === "tagAdded" || data.payload.action === "tagRemoved") {
+              // conversation list fetch already handles tags
+            }
+          }
+        } catch {
+          // ignore
+        }
+      });
+
+      es.addEventListener("note.created", (e: MessageEvent) => {
+        try {
+          const data = JSON.parse(e.data) as { conversationId: string };
+          const currentId = activeConversationRef.current;
+          if (currentId === data.conversationId) {
+            void fetchNotes(currentId);
+          }
+        } catch {
+          // ignore
+        }
+      });
+
+      es.onerror = () => {
+        if (disposed) return;
+        setSseStatus("disconnected");
+        es?.close();
+        es = null;
+        retryTimeout = setTimeout(connect, 3000);
+      };
+    };
+
+    connect();
+
+    return () => {
+      disposed = true;
+      if (retryTimeout) clearTimeout(retryTimeout);
+      es?.close();
+      setSseStatus("disconnected");
+    };
+  }, [isCheckingSession, session, fetchConversations, fetchMessages, fetchNotes]);
 
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -740,7 +824,19 @@ export default function InboxPage() {
       <div className="mx-auto flex h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:h-[calc(100vh-3rem)] md:flex-row">
         <aside className="flex h-[42%] w-full flex-col border-b border-slate-200 md:h-auto md:w-[360px] md:border-r md:border-b-0">
           <div className="border-b border-slate-200 px-5 py-4">
-            <h1 className="text-lg font-semibold text-slate-900">Unified Inbox</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-lg font-semibold text-slate-900">Unified Inbox</h1>
+              <span
+                title={sseStatus === "connected" ? "Realtime connected" : sseStatus === "connecting" ? "Connecting..." : "Disconnected"}
+                className={`inline-block h-2 w-2 rounded-full ${
+                  sseStatus === "connected"
+                    ? "bg-emerald-500"
+                    : sseStatus === "connecting"
+                      ? "bg-amber-400 animate-pulse"
+                      : "bg-slate-300"
+                }`}
+              />
+            </div>
             <p className="text-sm text-slate-500">
               {session ? session.organization.name : "Konuşmalar"}
             </p>

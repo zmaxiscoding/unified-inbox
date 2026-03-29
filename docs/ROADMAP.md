@@ -45,7 +45,7 @@ Remaining Tasks:
 
 Goal: Agents can work conversations end-to-end in one screen.
 
-Status: **Partial**
+Status: **Done**
 
 Delivered:
 - Conversation list, message thread, outbound send
@@ -54,28 +54,31 @@ Delivered:
 - Dev inbound simulation widget
 - Conversation status actions (`OPEN ↔ RESOLVED`) from UI with optimistic update + rollback
 - Status badge in conversation list and header
+- SSE-based realtime updates (new messages, status changes, assignment, tags, notes)
+- Connection status indicator in inbox header (green/amber/grey dot)
 
 Remaining Tasks:
-- [ ] Realtime update mechanism (SSE/WS)
+- None for current MVP gate
 
 ## Milestone M3 — Team Operations & Governance
 
 Goal: Owner-controlled team ops with auditability.
 
-Status: **Mostly Done**
+Status: **Done**
 
 Delivered:
 - Invites create/accept/revoke
 - Role update and member removal
 - Last owner invariants with transaction + DB safety
 - Owner-only audit log API with cursor pagination/filter
+- Audit log web UI with filters + cursor pagination + owner-only access
 - Conversation resolve/reopen audit events
+- Instagram outbound sending via Instagram Graph API adapter
+- Channel access token encryption at rest (AES-256-GCM, env-based key)
 
 Remaining Tasks:
-- [ ] Add audit log web UI (API is ready, no web route yet)
 - [ ] Expand audit event coverage for all critical mutations
 - [ ] Strengthen auth from demo mode to production-grade flow
-- [ ] Encrypt provider credentials at rest (`TODO(encrypt)` — 3 locations in channels service + schema)
 
 ## Release Gate for MVP
 
@@ -86,3 +89,6 @@ MVP is ready for external demo when all are true:
 3. Team owner flows (invite/role/remove) and audit logs verified
 4. Inbox supports assignment/tags/notes + basic filtering + resolve/reopen
 5. Smoke test script passes in CI
+6. Realtime SSE updates work for new messages and conversation state changes
+7. Instagram outbound sending is functional
+8. Channel tokens are encrypted at rest when `CHANNEL_TOKEN_SECRET` is set
