@@ -67,3 +67,18 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Seed database
+        run: pnpm --filter api exec prisma db seed
+
+      - name: Smoke test
+        run: |
+          cd apps/api && node dist/src/main.js &
+          API_PID=$!
+          trap "kill $API_PID || true" EXIT
+          # wait for API to be ready
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:3001/health >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          bash scripts/smoke-local.sh

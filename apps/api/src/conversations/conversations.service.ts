@@ -4,7 +4,13 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
-import { ConversationStatus, MessageDirection, OutboundMessageDeliveryStatus, Prisma } from "@prisma/client";
+import {
+  ConversationStatus,
+  MessageDirection,
+  OutboundMessageDeliveryStatus,
+  Prisma,
+} from "@prisma/client";
+import { ListConversationsQueryDto } from "./dto/list-conversations-query.dto";
 import { OutboundQueueService } from "../outbound/outbound.queue.service";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -20,8 +26,8 @@ type MessageWithRelations = {
 
 type ConversationListItem = {
   id: string;
-  contactName: string;
   status: ConversationStatus;
+  contactName: string;
   lastMessageAt: Date | null;
   channel: { type: string };
   assignedMembership: {
@@ -44,7 +50,7 @@ export class ConversationsService {
 
   async listConversations(
     organizationId: string,
-    filters?: { status?: ConversationStatus; search?: string; assignedTo?: string },
+    filters?: ListConversationsQueryDto,
   ) {
     const where: Prisma.ConversationWhereInput = { organizationId };
 
@@ -52,21 +58,26 @@ export class ConversationsService {
       where.status = filters.status;
     }
 
+    if (filters?.channel) {
+      where.channel = { type: filters.channel };
+    }
+
+    if (filters?.assigneeId) {
+      where.assignedMembershipId = filters.assigneeId;
+    }
+
+    if (filters?.tagId) {
+      where.tags = { some: { tagId: filters.tagId } };
+    }
+
     if (filters?.search) {
       const term = filters.search.trim();
       if (term) {
         where.OR = [
           { contactName: { contains: term, mode: "insensitive" } },
-          { contactPhone: { contains: term, mode: "insensitive" } },
           { lastMessageText: { contains: term, mode: "insensitive" } },
         ];
       }
-    }
-
-    if (filters?.assignedTo === "unassigned") {
-      where.assignedMembershipId = null;
-    } else if (filters?.assignedTo) {
-      where.assignedMembershipId = filters.assignedTo;
     }
 
     const conversations = await this.prisma.conversation.findMany({
@@ -74,8 +85,8 @@ export class ConversationsService {
       orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
       select: {
         id: true,
-        contactName: true,
         status: true,
+        contactName: true,
         lastMessageAt: true,
         channel: { select: { type: true } },
         assignedMembership: {
@@ -101,8 +112,8 @@ export class ConversationsService {
 
     return conversations.map((conversation: ConversationListItem) => ({
       id: conversation.id,
-      customerDisplay: conversation.contactName,
       status: conversation.status,
+      customerDisplay: conversation.contactName,
       lastMessageAt: conversation.lastMessageAt,
       channelProvider: conversation.channel.type,
       assignedMembership: conversation.assignedMembership
@@ -324,6 +335,67 @@ export class ConversationsService {
     };
   }
 
+  async updateConversationStatus(
+    organizationId: string,
+    actorUserId: string,
+    conversationId: string,
+    status: "OPEN" | "RESOLVED",
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const conversation = await tx.conversation.findFirst({
+        where: {
+          id: conversationId,
+          organizationId,
+        },
+        select: {
+          id: true,
+          status: true,
+        },
+      });
+
+      if (!conversation) {
+        throw new NotFoundException("Conversation not found");
+      }
+
+      if (conversation.status === status) {
+        return {
+          id: conversation.id,
+          status: conversation.status,
+        };
+      }
+
+      const updatedConversation = await tx.conversation.update({
+        where: { id: conversation.id },
+        data: { status },
+        select: {
+          id: true,
+          status: true,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          action:
+            updatedConversation.status === "RESOLVED"
+              ? "conversation.resolved"
+              : "conversation.reopened",
+          targetId: updatedConversation.id,
+          metadata: {
+            fromStatus: conversation.status,
+            toStatus: updatedConversation.status,
+          },
+          organizationId,
+          actorId: actorUserId,
+        },
+      });
+
+      return {
+        id: updatedConversation.id,
+        status: updatedConversation.status,
+      };
+    });
+  }
+
   async listConversationNotes(
     organizationId: string,
     conversationId: string,
@@ -482,51 +554,6 @@ export class ConversationsService {
         },
       },
     });
-  }
-
-  async updateConversationStatus(
-    organizationId: string,
-    actorUserId: string,
-    conversationId: string,
-    newStatus: ConversationStatus,
-  ) {
-    const conversation = await this.prisma.conversation.findFirst({
-      where: { id: conversationId, organizationId },
-      select: { id: true, status: true },
-    });
-
-    if (!conversation) {
-      throw new NotFoundException("Conversation not found");
-    }
-
-    if (conversation.status === newStatus) {
-      return { id: conversation.id, status: newStatus };
-    }
-
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const result = await tx.conversation.update({
-        where: { id: conversation.id },
-        data: { status: newStatus },
-        select: { id: true, status: true },
-      });
-
-      await tx.auditLog.create({
-        data: {
-          action: "conversation.status_changed",
-          targetId: conversation.id,
-          metadata: {
-            from: conversation.status,
-            to: newStatus,
-          },
-          organizationId,
-          actorId: actorUserId,
-        },
-      });
-
-      return result;
-    });
-
-    return { id: updated.id, status: updated.status };
   }
 
   private async getConversationInOrganization(

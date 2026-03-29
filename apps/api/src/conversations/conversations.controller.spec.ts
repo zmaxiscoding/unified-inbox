@@ -9,7 +9,7 @@ import { AssignConversationDto } from "./dto/assign-conversation.dto";
 import { CreateMessageDto } from "./dto/create-message.dto";
 import { CreateNoteDto } from "./dto/create-note.dto";
 import { ListConversationsQueryDto } from "./dto/list-conversations-query.dto";
-import { UpdateStatusDto } from "./dto/update-status.dto";
+import { UpdateConversationStatusDto } from "./dto/update-conversation-status.dto";
 
 const VALID_CUID_MEMBERSHIP_ID = "cjfne4n3f0000qzrmn831i7rn";
 
@@ -21,12 +21,12 @@ describe("ConversationsController", () => {
     listConversationMessages: jest.Mock;
     createOutboundMessage: jest.Mock;
     assignConversation: jest.Mock;
+    updateConversationStatus: jest.Mock;
     listConversationTags: jest.Mock;
     addTagToConversation: jest.Mock;
     removeTagFromConversation: jest.Mock;
     listConversationNotes: jest.Mock;
     createConversationNote: jest.Mock;
-    updateConversationStatus: jest.Mock;
   };
   const session: SessionPayload = {
     userId: "user_1",
@@ -42,12 +42,12 @@ describe("ConversationsController", () => {
       listConversationMessages: jest.fn(),
       createOutboundMessage: jest.fn(),
       assignConversation: jest.fn(),
+      updateConversationStatus: jest.fn(),
       listConversationTags: jest.fn(),
       addTagToConversation: jest.fn(),
       removeTagFromConversation: jest.fn(),
       listConversationNotes: jest.fn(),
       createConversationNote: jest.fn(),
-      updateConversationStatus: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -133,6 +133,30 @@ describe("ConversationsController", () => {
       "user_1",
       "c1",
       null,
+    );
+  });
+
+  it("should update conversation status via service", async () => {
+    service.updateConversationStatus.mockResolvedValue({
+      id: "c1",
+      status: "RESOLVED",
+    });
+
+    const result = await controller.updateConversationStatus(
+      "c1",
+      { status: "RESOLVED" },
+      session,
+    );
+
+    expect(result).toEqual({
+      id: "c1",
+      status: "RESOLVED",
+    });
+    expect(service.updateConversationStatus).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      "c1",
+      "RESOLVED",
     );
   });
 
@@ -225,6 +249,57 @@ describe("ConversationsController", () => {
         { membershipId: "not-a-cuid" },
         metadata,
       ),
+    ).rejects.toThrow();
+  });
+
+  it("should accept status payload OPEN", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: UpdateConversationStatusDto,
+      data: "",
+    };
+
+    await expect(pipe.transform({ status: "OPEN" }, metadata)).resolves.toEqual({
+      status: "OPEN",
+    });
+  });
+
+  it("should accept status payload RESOLVED", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: UpdateConversationStatusDto,
+      data: "",
+    };
+
+    await expect(pipe.transform({ status: "RESOLVED" }, metadata)).resolves.toEqual({
+      status: "RESOLVED",
+    });
+  });
+
+  it("should reject status payload outside OPEN and RESOLVED", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: UpdateConversationStatusDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ status: "SNOOZED" }, metadata),
     ).rejects.toThrow();
   });
 
@@ -407,108 +482,30 @@ describe("ConversationsController", () => {
     ).resolves.toEqual({ body: "Bu bir not" });
   });
 
-  // ── Status endpoint tests ────────────────────────────────
+  // ── List conversations with filters ───────────────────────
 
-  it("should update conversation status via service", async () => {
-    service.updateConversationStatus.mockResolvedValue({ id: "c1", status: "RESOLVED" });
-
-    const result = await controller.updateStatus(
-      "c1",
-      { status: "RESOLVED" as const },
-      session,
-    );
-
-    expect(result).toEqual({ id: "c1", status: "RESOLVED" });
-    expect(service.updateConversationStatus).toHaveBeenCalledWith(
-      "org_1",
-      "user_1",
-      "c1",
-      "RESOLVED",
-    );
-  });
-
-  it("should reject invalid status value", async () => {
-    const pipe = new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    });
-    const metadata: ArgumentMetadata = {
-      type: "body",
-      metatype: UpdateStatusDto,
-      data: "",
-    };
-
-    await expect(
-      pipe.transform({ status: "INVALID" }, metadata),
-    ).rejects.toThrow();
-  });
-
-  it("should accept valid status value", async () => {
-    const pipe = new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    });
-    const metadata: ArgumentMetadata = {
-      type: "body",
-      metatype: UpdateStatusDto,
-      data: "",
-    };
-
-    await expect(
-      pipe.transform({ status: "RESOLVED" }, metadata),
-    ).resolves.toEqual({ status: "RESOLVED" });
-  });
-
-  it("should reject status payload with unknown fields", async () => {
-    const pipe = new ValidationPipe({
-      whitelist: true,
-      forbidNonWhitelisted: true,
-      transform: true,
-    });
-    const metadata: ArgumentMetadata = {
-      type: "body",
-      metatype: UpdateStatusDto,
-      data: "",
-    };
-
-    await expect(
-      pipe.transform({ status: "RESOLVED", extra: "nope" }, metadata),
-    ).rejects.toThrow();
-  });
-
-  // ── Query filter tests ───────────────────────────────────
-
-  it("should pass filter params to listConversations", async () => {
+  it("should list conversations with filters via service", async () => {
     service.listConversations.mockResolvedValue([]);
 
-    await controller.getConversations(session, {
-      status: "RESOLVED" as const,
-      search: "ali",
-      assignedTo: "mem_1",
-    });
+    const query: ListConversationsQueryDto = { status: "OPEN", channel: "WHATSAPP" };
+    const result = await controller.getConversations(session, query);
 
-    expect(service.listConversations).toHaveBeenCalledWith("org_1", {
-      status: "RESOLVED",
-      search: "ali",
-      assignedTo: "mem_1",
-    });
+    expect(result).toEqual([]);
+    expect(service.listConversations).toHaveBeenCalledWith("org_1", query);
   });
 
-  it("should pass undefined filters when no query params provided", async () => {
+  it("should list conversations without filters", async () => {
     service.listConversations.mockResolvedValue([]);
 
-    await controller.getConversations(session, {});
+    const result = await controller.getConversations(session, {});
 
-    expect(service.listConversations).toHaveBeenCalledWith("org_1", {
-      status: undefined,
-      search: undefined,
-      assignedTo: undefined,
-    });
+    expect(result).toEqual([]);
+    expect(service.listConversations).toHaveBeenCalledWith("org_1", {});
   });
 
-  it("should reject invalid status in query params", async () => {
+  // ── Filter DTO validation ─────────────────────────────────
+
+  it("should accept valid filter query params", async () => {
     const pipe = new ValidationPipe({ whitelist: true, transform: true });
     const metadata: ArgumentMetadata = {
       type: "query",
@@ -517,11 +514,11 @@ describe("ConversationsController", () => {
     };
 
     await expect(
-      pipe.transform({ status: "INVALID_STATUS" }, metadata),
-    ).rejects.toThrow();
+      pipe.transform({ status: "OPEN", channel: "INSTAGRAM", search: "test" }, metadata),
+    ).resolves.toEqual({ status: "OPEN", channel: "INSTAGRAM", search: "test" });
   });
 
-  it("should accept valid query params", async () => {
+  it("should reject invalid status filter", async () => {
     const pipe = new ValidationPipe({ whitelist: true, transform: true });
     const metadata: ArgumentMetadata = {
       type: "query",
@@ -530,7 +527,31 @@ describe("ConversationsController", () => {
     };
 
     await expect(
-      pipe.transform({ status: "OPEN", search: "test" }, metadata),
-    ).resolves.toEqual({ status: "OPEN", search: "test" });
+      pipe.transform({ status: "SNOOZED" }, metadata),
+    ).rejects.toThrow();
+  });
+
+  it("should reject invalid channel filter", async () => {
+    const pipe = new ValidationPipe({ whitelist: true, transform: true });
+    const metadata: ArgumentMetadata = {
+      type: "query",
+      metatype: ListConversationsQueryDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ channel: "EMAIL" }, metadata),
+    ).rejects.toThrow();
+  });
+
+  it("should accept empty filter query", async () => {
+    const pipe = new ValidationPipe({ whitelist: true, transform: true });
+    const metadata: ArgumentMetadata = {
+      type: "query",
+      metatype: ListConversationsQueryDto,
+      data: "",
+    };
+
+    await expect(pipe.transform({}, metadata)).resolves.toEqual({});
   });
 });

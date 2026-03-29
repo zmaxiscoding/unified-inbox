@@ -1,19 +1,28 @@
-import { IsEnum, IsOptional, IsString, MaxLength } from "class-validator";
-import { ConversationStatus } from "@prisma/client";
+import { IsIn, IsOptional, IsString, MaxLength } from "class-validator";
 
 export class ListConversationsQueryDto {
   @IsOptional()
-  @IsEnum(ConversationStatus, {
-    message: "status must be one of: OPEN, RESOLVED, SNOOZED",
+  @IsIn(["OPEN", "RESOLVED"], {
+    message: "status must be OPEN or RESOLVED",
   })
-  status?: ConversationStatus;
+  status?: "OPEN" | "RESOLVED";
+
+  @IsOptional()
+  @IsIn(["WHATSAPP", "INSTAGRAM"], {
+    message: "channel must be WHATSAPP or INSTAGRAM",
+  })
+  channel?: "WHATSAPP" | "INSTAGRAM";
+
+  @IsOptional()
+  @IsString()
+  assigneeId?: string;
+
+  @IsOptional()
+  @IsString()
+  tagId?: string;
 
   @IsOptional()
   @IsString()
   @MaxLength(200)
   search?: string;
-
-  @IsOptional()
-  @IsString()
-  assignedTo?: string;
 }

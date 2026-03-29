@@ -51,6 +51,7 @@ pnpm prisma:generate  # Prisma Client üretir
 pnpm db:migrate       # Migration oluşturur ve uygular (dev)
 pnpm db:seed          # Seed verisini yükler
 pnpm db:reset         # DB'yi sıfırlar ve migration'ları yeniden uygular
+pnpm smoke:local      # API health + login + session + conversations smoke testi
 ```
 
 ## API Örnekleri
@@ -66,6 +67,11 @@ curl -b cookie.txt http://localhost:3001/auth/session
 
 # Konuşmaları listele (auth gerekli)
 curl -b cookie.txt http://localhost:3001/conversations
+
+# Konuşmaları filtrele (status, channel, assigneeId, tagId, search)
+curl -b cookie.txt "http://localhost:3001/conversations?status=OPEN&channel=WHATSAPP"
+curl -b cookie.txt "http://localhost:3001/conversations?search=kargo"
+curl -b cookie.txt "http://localhost:3001/conversations?assigneeId=<membershipId>&tagId=<tagId>"
 
 # Assign dropdown için organization member listesi
 curl -b cookie.txt http://localhost:3001/conversations/members
@@ -87,6 +93,16 @@ curl -b cookie.txt -X PATCH http://localhost:3001/conversations/<conversationId>
 curl -b cookie.txt -X PATCH http://localhost:3001/conversations/<conversationId>/assign \
   -H "Content-Type: application/json" \
   -d '{"membershipId":null}'
+
+# Konuşmayı resolve et
+curl -b cookie.txt -X PATCH http://localhost:3001/conversations/<conversationId>/status \
+  -H "Content-Type: application/json" \
+  -d '{"status":"RESOLVED"}'
+
+# Konuşmayı reopen et
+curl -b cookie.txt -X PATCH http://localhost:3001/conversations/<conversationId>/status \
+  -H "Content-Type: application/json" \
+  -d '{"status":"OPEN"}'
 
 # Konuşma etiketlerini listele
 curl -b cookie.txt http://localhost:3001/conversations/<conversationId>/tags
@@ -153,6 +169,15 @@ curl -b cookie.txt -X POST http://localhost:3001/channels/whatsapp/connect \
     "accessToken":"EAAG....",
     "displayPhoneNumber":"+90 555 111 22 33",
     "wabaId":"1029384756"
+  }'
+
+# Instagram kanalını bağla
+curl -b cookie.txt -X POST http://localhost:3001/channels/instagram/connect \
+  -H "Content-Type: application/json" \
+  -d '{
+    "instagramAccountId":"17841400123456789",
+    "accessToken":"EAAG....",
+    "displayName":"@myshop"
   }'
 
 # WhatsApp webhook verify endpoint (Meta setup)

@@ -15,12 +15,12 @@ import {
 import { Session } from "../auth/session.decorator";
 import { SessionPayload } from "../auth/auth.types";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
+import { ListConversationsQueryDto } from "./dto/list-conversations-query.dto";
 import { AddTagDto } from "./dto/add-tag.dto";
 import { AssignConversationDto } from "./dto/assign-conversation.dto";
 import { CreateMessageDto } from "./dto/create-message.dto";
 import { CreateNoteDto } from "./dto/create-note.dto";
-import { ListConversationsQueryDto } from "./dto/list-conversations-query.dto";
-import { UpdateStatusDto } from "./dto/update-status.dto";
+import { UpdateConversationStatusDto } from "./dto/update-conversation-status.dto";
 import { ConversationsService } from "./conversations.service";
 
 @Controller("conversations")
@@ -43,11 +43,7 @@ export class ConversationsController {
   ) {
     return this.conversationsService.listConversations(
       session.organizationId,
-      {
-        status: query.status,
-        search: query.search,
-        assignedTo: query.assignedTo,
-      },
+      query,
     );
   }
 
@@ -183,9 +179,9 @@ export class ConversationsController {
       transform: true,
     }),
   )
-  updateStatus(
+  updateConversationStatus(
     @Param("id") id: string,
-    @Body() body: UpdateStatusDto,
+    @Body() body: UpdateConversationStatusDto,
     @Session() session: SessionPayload,
   ) {
     return this.conversationsService.updateConversationStatus(
