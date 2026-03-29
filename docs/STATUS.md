@@ -19,16 +19,16 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 - Tests pass: `pnpm test`
 - Build passes: `pnpm build` (web + api)
 - One-command bootstrap: `pnpm demo:local` reaches `install -> setup -> migrate -> seed -> dev`
-- Smoke script: `scripts/smoke-local.sh` covers health -> password login -> session -> conversations
+- Smoke script: `scripts/smoke-local.sh` covers health -> password login -> session -> conversations, with optional SSE fanout validation
 - Webhook pipeline: `persist -> queue -> worker` (WhatsApp + Instagram inbound)
 - Conversation resolve/reopen: API + UI + audit logging complete
 - Audit log web UI route is present in app: `/settings/audit-log`
-- SSE realtime updates: `GET /events/stream` pushes org-scoped events to inbox UI
+- SSE realtime updates: `GET /events/stream` pushes org-scoped events to inbox UI via Redis Pub/Sub fanout when `REDIS_URL` is configured
 - Instagram outbound: send parity with WhatsApp via account-scoped Instagram Graph API adapter
 - Token encryption: channel access tokens encrypted at rest; `CHANNEL_TOKEN_SECRET` required in production (fail-fast)
 - Auth: bcrypt-backed email/password login, one-time owner bootstrap, secure invite onboarding, legacy null-password activation via fresh invite, cold-start owner recovery via `AUTH_RECOVERY_SECRET`, password reset request/confirm, email verification request/resend/confirm, explicit `soft|login` verification gate, logout + session validation
 - Auth email delivery: provider-agnostic `disabled|outbox|resend` transport with development outbox preview files and Resend production baseline
-- SSE limitation: process-local only; does not work across multiple API instances or separate worker processes
+- Realtime fallback: when `REDIS_URL` is absent in non-production, SSE safely falls back to same-process delivery only
 
 ## What Is Broken or Missing
 
@@ -36,8 +36,8 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
    - WhatsApp/Instagram live send-receive requires real provider credentials.
 2. Account recovery follow-up:
    - MFA is not implemented yet.
-3. Scalability:
-   - SSE realtime bus is in-memory; needs Redis Pub/Sub for multi-process deployments.
+3. Operational visibility:
+   - Explicit dead-letter visibility and queue metrics are still limited in docs/product surface.
 
 ## MVP Checklist
 
@@ -55,18 +55,18 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 |10 | Auditability (audit log API) | Done | Cursor pagination + filters + owner-only access |
 |11 | Audit log web UI | Done | Web route/page present with filters + cursor pagination |
 |12 | Inbox filters + search | Done | Status/channel/assignee/tag + text search |
-|13 | Realtime updates (SSE) | Done | SSE stream at `/events/stream`, org-scoped, auto-reconnect client |
+|13 | Realtime updates (SSE) | Done | SSE stream at `/events/stream`, org-scoped, auto-reconnect client, Redis Pub/Sub fanout across processes |
 |14 | Reproducible local demo | Done | `pnpm demo:local` + `pnpm smoke:local` + Node20 enforcement |
 |15 | Token encryption at rest | Done | AES-256-GCM via `CHANNEL_TOKEN_SECRET`; graceful degradation if unset |
 
 ## MVP Progress
 
-Estimated MVP progress: **99%**
+Estimated MVP progress: **100%**
 
 Rationale:
-- All core backend domain, ingestion pipeline, conversation lifecycle, filters/search, audit log UI, realtime SSE, Instagram outbound, token encryption, and password-backed auth are complete.
-- Bootstrap reproducibility is solid with runtime checks, smoke script, CI smoke, and one-command local demo.
-- Remaining gaps are multi-process realtime fanout, real provider credentials for live channel demos, and MFA.
+- All core backend domain, ingestion pipeline, conversation lifecycle, filters/search, audit log UI, realtime SSE with Redis fanout, Instagram outbound, token encryption, and password-backed auth are complete.
+- Bootstrap reproducibility is solid with runtime checks, smoke script, CI smoke, one-command local demo, and optional realtime smoke coverage.
+- Remaining gaps are now operational/provider follow-ups such as live credentials, richer observability, and MFA.
 
 ## Single Roadmap + Todo System
 
@@ -89,7 +89,7 @@ Use this as the single source of truth, with milestones in [ROADMAP.md](./ROADMA
 
 - [x] Add password reset and email verification flow
 - [x] Replace auth email outbox transport with a real provider and decide enforcement gate
-- [ ] Move SSE fanout from in-memory subjects to Redis Pub/Sub
+- [x] Move SSE fanout from in-memory subjects to Redis Pub/Sub
 
 ### Later (P2)
 

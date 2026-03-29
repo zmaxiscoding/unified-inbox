@@ -17,7 +17,7 @@ Delivered:
 - `pnpm demo:local` one-command bootstrap
 - `.nvmrc` (`20`), `volta` config (`20.11.1` / `9.15.0`), `engine-strict=true`
 - `pnpm smoke:local` wired in `package.json`
-- `scripts/smoke-local.sh` covers health → login → session → conversations
+- `scripts/smoke-local.sh` covers health → login → session → conversations, with optional realtime fanout verification
 - CI pipeline (`.github/workflows/ci.yml`) with Postgres + Redis services
 - CI smoke step seeds the DB, boots the built API, and runs `scripts/smoke-local.sh`
 
@@ -56,6 +56,7 @@ Delivered:
 - Status badge in conversation list and header
 - SSE-based realtime updates (new messages, status changes, assignment, tags, notes)
 - Connection status indicator in inbox header (green/amber/grey dot)
+- Redis Pub/Sub fanout behind the existing SSE contract for multi-process delivery
 
 Remaining Tasks:
 - None for current MVP gate
@@ -80,7 +81,7 @@ Delivered:
 
 Remaining Tasks:
 - [ ] Expand audit event coverage for all critical mutations
-- [ ] Replace process-local SSE transport with Redis Pub/Sub
+- [x] Replace process-local SSE transport with Redis Pub/Sub
 
 ## Release Gate for MVP
 
@@ -91,6 +92,6 @@ MVP is ready for external demo when all are true:
 3. Team owner flows (invite/role/remove) and audit logs verified
 4. Inbox supports assignment/tags/notes + basic filtering + resolve/reopen
 5. Smoke test script passes in CI
-6. Realtime SSE updates work for new messages and conversation state changes
+6. Realtime SSE updates work for new messages and conversation state changes across API/worker processes
 7. Instagram outbound sending is functional
 8. Channel tokens are encrypted at rest when `CHANNEL_TOKEN_SECRET` is set

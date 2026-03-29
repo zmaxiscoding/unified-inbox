@@ -88,8 +88,16 @@ Idempotency:
 - `GET /events/stream` — Server-Sent Events endpoint, session-authenticated
 - Events are org-scoped: clients only receive events for their `organizationId`
 - Event types: `message.created`, `conversation.updated`, `note.created`
-- Backend: `EventsService` uses rxjs `Subject` per org, auto-cleans when no subscribers
-- **Limitation**: process-local only — if BullMQ workers or additional API instances run in separate processes, their events won't reach SSE clients. Scale path: Redis Pub/Sub transport.
+- Backend: `EventsService` keeps an in-memory rxjs `Subject` per org for local SSE clients, but fanout transport is abstraction-based
+- Default transport: Redis Pub/Sub using deterministic org channels: `unified-inbox:events:org:<organizationId>`
+- Publish path: conversation service + webhook worker still call `eventsService.emit(...)`; service immediately notifies same-process clients and also publishes the event envelope to Redis
+- Subscribe path: API instances subscribe to Redis only while they have at least one SSE client for that org; last client disconnect triggers unsubscribe/cleanup
+- Fanout safety:
+  - channel naming is org-scoped
+  - payload also carries `organizationId`
+  - self-originated Redis messages are ignored via per-instance `sourceId`
+- Reconnect behavior: Redis client auto-retries and preserves registered org handlers; Nest shutdown hooks close Redis clients on shutdown
+- Degradation policy: if `REDIS_URL` is missing in non-production, realtime falls back to same-process delivery only; production requires `REDIS_URL`
 - Frontend: `EventSource` with auto-reconnect (3s delay), connection status indicator (green/amber/grey dot)
 - Integration points: conversations service, webhook worker emit events after mutations
 
@@ -119,7 +127,7 @@ Idempotency:
 - 28 test suites, 218 tests (all in `apps/api`)
 - `apps/web` has typecheck only (no unit/integration tests)
 - CI: `.github/workflows/ci.yml` — lint + test + build on push/PR to main
-- Local smoke: `scripts/smoke-local.sh` — health → login → session → conversations
+- Local smoke: `scripts/smoke-local.sh` — health → login → session → conversations, plus optional SSE fanout validation
 
 ## Current Gaps
 

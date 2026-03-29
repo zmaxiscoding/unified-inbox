@@ -119,6 +119,26 @@ Optional outbox smoke:
 SMOKE_AUTH_EMAIL=1 SMOKE_AUTH_EMAIL_OUTBOX_DIR=apps/api/.auth-email-outbox pnpm smoke:local
 ```
 
+Optional realtime fanout smoke:
+
+```bash
+# Terminal 1
+PORT=3001 pnpm --filter api dev
+
+# Terminal 2
+PORT=3002 pnpm --filter api dev
+
+# Terminal 3
+SMOKE_REALTIME=1 \
+SMOKE_REALTIME_SSE_API_URL=http://localhost:3001 \
+SMOKE_REALTIME_PUBLISH_API_URL=http://localhost:3002 \
+pnpm smoke:local
+```
+
+Notes:
+- `GET /events/stream` contract stays unchanged; Redis Pub/Sub is internal fanout transport only.
+- If `REDIS_URL` is absent in non-production, realtime safely falls back to same-process delivery and the cross-process smoke above is expected to fail.
+
 ## Troubleshooting
 
 ### Unsupported Node version

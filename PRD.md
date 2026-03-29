@@ -127,7 +127,7 @@ Unified Inbox, e-ticaret markalarının WhatsApp ve Instagram mesajlarını tek 
 **Acceptance Criteria:**
 - Yeni mesaj geldiğinde konuşma listesi ve açık konuşma view'ı otomatik güncellenir.
 - Bağlantı kesilirse UI "Bağlantı yok" uyarısı gösterir ve yeniden bağlanmayı dener.
-- MVP için WebSocket veya uzun-polling (long-polling) kabul edilir; tercih WebSocket (Socket.io / native WS).
+- MVP implementasyonu `GET /events/stream` üzerinden SSE kullanır; backend fanout için Redis Pub/Sub kullanılabilir ama client sözleşmesi SSE olarak sabit kalır.
 - Realtime güncelleme yalnızca kullanıcının workspace'indeki konuşmaları kapsar.
 
 ---

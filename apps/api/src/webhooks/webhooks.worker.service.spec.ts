@@ -12,6 +12,9 @@ const BASE_RAW_EVENT = {
 
 describe("WebhooksWorkerService", () => {
   let service: WebhooksWorkerService;
+  let eventsService: {
+    emit: jest.Mock;
+  };
   let prisma: {
     rawWebhookEvent: {
       findUnique: jest.Mock;
@@ -61,10 +64,10 @@ describe("WebhooksWorkerService", () => {
       }),
     };
 
-    const eventsService = { emit: jest.fn() } as unknown as EventsService;
+    eventsService = { emit: jest.fn() };
     service = new WebhooksWorkerService(
       prisma as unknown as PrismaService,
-      eventsService,
+      eventsService as unknown as EventsService,
     );
   });
 
@@ -251,13 +254,7 @@ describe("WebhooksWorkerService", () => {
     prisma.message.create.mockRejectedValue({ code: "P2002" });
     prisma.rawWebhookEvent.update.mockResolvedValue({});
 
-    const eventsService = { emit: jest.fn() } as unknown as EventsService;
-    const svc = new WebhooksWorkerService(
-      prisma as unknown as PrismaService,
-      eventsService,
-    );
-
-    await svc.processRawEvent("rwe_1");
+    await service.processRawEvent("rwe_1");
 
     // Conversation must NOT be updated on duplicate
     expect(prisma.conversation.update).not.toHaveBeenCalled();
@@ -344,6 +341,23 @@ describe("WebhooksWorkerService", () => {
         processingStatus: "PROCESSED",
         processedAt: expect.any(Date),
         error: null,
+      },
+    });
+    expect(eventsService.emit).toHaveBeenNthCalledWith(1, "org_1", {
+      type: "message.created",
+      conversationId: "conv_ig_1",
+      payload: {
+        direction: "INBOUND",
+        text: "Hello from Instagram",
+        senderDisplay: "ig_sender_456",
+      },
+    });
+    expect(eventsService.emit).toHaveBeenNthCalledWith(2, "org_1", {
+      type: "conversation.updated",
+      conversationId: "conv_ig_1",
+      payload: {
+        action: "newInboundMessage",
+        lastMessageText: "Hello from Instagram",
       },
     });
   });

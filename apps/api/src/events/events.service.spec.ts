@@ -1,15 +1,25 @@
 import { EventsService } from "./events.service";
 import { SseEvent } from "./event.types";
+import { EventsTransport } from "./events.transport";
 
 describe("EventsService", () => {
   let service: EventsService;
+  let transport: EventsTransport;
 
   beforeEach(() => {
-    service = new EventsService();
+    transport = {
+      mode: "local",
+      publish: jest.fn().mockResolvedValue(undefined),
+      subscribe: jest.fn().mockResolvedValue(undefined),
+      unsubscribe: jest.fn().mockResolvedValue(undefined),
+      destroy: jest.fn().mockResolvedValue(undefined),
+    };
+
+    service = new EventsService(transport);
   });
 
-  afterEach(() => {
-    service.onModuleDestroy();
+  afterEach(async () => {
+    await service.onModuleDestroy();
   });
 
   it("should deliver events to subscribers of the same organization", (done) => {
@@ -29,6 +39,12 @@ describe("EventsService", () => {
     });
 
     service.emit(orgId, {
+      type: "message.created",
+      conversationId: "conv_1",
+      payload: { text: "hello" },
+    });
+
+    expect(transport.publish).toHaveBeenCalledWith(orgId, {
       type: "message.created",
       conversationId: "conv_1",
       payload: { text: "hello" },
@@ -88,32 +104,65 @@ describe("EventsService", () => {
       conversationId: "conv_1",
       payload: { action: "statusChanged" },
     });
+
+    expect(transport.subscribe).toHaveBeenCalledTimes(1);
   });
 
-  it("should clean up subject when last subscriber disconnects", () => {
+  it("should bridge external fanout events back into local subscribers", async () => {
+    let fanoutHandler: ((event: SseEvent) => void) | undefined;
+    (transport.subscribe as jest.Mock).mockImplementation(
+      async (_organizationId: string, onEvent: (event: SseEvent) => void) => {
+        fanoutHandler = onEvent;
+      },
+    );
+
+    service = new EventsService(transport);
+
+    const received: SseEvent[] = [];
+    const sub = service.subscribe("org_1").subscribe({
+      next: (event) => {
+        received.push(event);
+      },
+    });
+
+    fanoutHandler?.({
+      type: "note.created",
+      conversationId: "conv_external",
+      payload: { body: "from another process" },
+    });
+
+    sub.unsubscribe();
+
+    expect(received).toEqual([
+      {
+        type: "note.created",
+        conversationId: "conv_external",
+        payload: { body: "from another process" },
+      },
+    ]);
+  });
+
+  it("should clean up transport subscription when last subscriber disconnects", () => {
     const orgId = "org_1";
 
     const sub1 = service.subscribe(orgId).subscribe();
     const sub2 = service.subscribe(orgId).subscribe();
 
     sub1.unsubscribe();
-    // Emitting should still work for sub2
-    const events: SseEvent[] = [];
     sub2.unsubscribe();
 
-    // After all unsubscribe, emit should be a no-op (no error)
-    service.emit(orgId, {
-      type: "message.created",
-      conversationId: "conv_1",
-      payload: {},
-    });
-
-    expect(events).toHaveLength(0);
+    expect(transport.unsubscribe).toHaveBeenCalledWith(orgId);
   });
 
   it("should handle emit when no subscribers exist", () => {
     // Should not throw
     service.emit("org_nonexistent", {
+      type: "message.created",
+      conversationId: "conv_1",
+      payload: {},
+    });
+
+    expect(transport.publish).toHaveBeenCalledWith("org_nonexistent", {
       type: "message.created",
       conversationId: "conv_1",
       payload: {},

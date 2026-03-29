@@ -41,6 +41,9 @@ importers:
       class-validator:
         specifier: ^0.14.2
         version: 0.14.4
+      ioredis:
+        specifier: ^5.9.3
+        version: 5.9.3
       reflect-metadata:
         specifier: ^0.2.0
         version: 0.2.2
