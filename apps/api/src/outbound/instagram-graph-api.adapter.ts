@@ -53,7 +53,7 @@ export class InstagramGraphApiAdapter {
     }
 
     const apiVersion = process.env.INSTAGRAM_GRAPH_API_VERSION?.trim() || "v21.0";
-    const endpoint = `https://graph.instagram.com/${apiVersion}/me/messages`;
+    const endpoint = `https://graph.instagram.com/${apiVersion}/${input.instagramAccountId}/messages`;
 
     const decryptedToken = this.crypto.decrypt(channelAccount.accessToken);
 

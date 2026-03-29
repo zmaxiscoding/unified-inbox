@@ -57,10 +57,15 @@ pnpm smoke:local      # API health + login + session + conversations smoke testi
 ## API Örnekleri
 
 ```bash
+# Empty system bootstrap (yalnızca ilk owner henüz oluşturulmadıysa)
+curl -i -c cookie.txt -X POST http://localhost:3001/auth/bootstrap \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Ali Yilmaz","email":"owner@acme.com","password":"OwnerPass123!","organizationName":"Acme Store"}'
+
 # Login (cookie oluşturur)
 curl -i -c cookie.txt -X POST http://localhost:3001/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"agent@acme.com"}'
+  -d '{"email":"agent@acme.com","password":"AgentPass123!"}'
 
 # Oturum bilgisi
 curl -b cookie.txt http://localhost:3001/auth/session
@@ -136,10 +141,18 @@ curl -i -c cookie.txt -X POST http://localhost:3001/invites/accept \
   -H "Content-Type: application/json" \
   -d '{"token":"<hex_token>","name":"Yeni Ajan","password":"guclu-sifre-123"}'
 
-# Daveti kabul et (mevcut kullanıcı)
+# Daveti kabul et (mevcut kullanıcı, mevcut şifreyi doğrula)
 curl -i -c cookie.txt -X POST http://localhost:3001/invites/accept \
   -H "Content-Type: application/json" \
-  -d '{"token":"<hex_token>"}'
+  -d '{"token":"<hex_token>","password":"ExistingPass123!"}'
+
+# Daveti kabul et (legacy null-password kullanıcıyı aktive et)
+curl -i -c cookie.txt -X POST http://localhost:3001/invites/accept \
+  -H "Content-Type: application/json" \
+  -d '{"token":"<hex_token>","password":"LegacyPass123!"}'
+
+# Not: Mevcut bir üyelikte `passwordHash = null` kaldıysa OWNER aynı e-posta için
+# yeni bir invite üretebilir; invite kabulü mevcut üyeliği koruyup hesabın şifresini set eder.
 
 # Daveti iptal et (OWNER yetkisi gerekli)
 curl -b cookie.txt -X DELETE http://localhost:3001/invites/<inviteId>
@@ -253,6 +266,7 @@ pnpm dev
 ```
 
 - Login: `http://localhost:3000/login`
+- Seed login: `agent@acme.com / AgentPass123!`, `owner@acme.com / OwnerPass123!`
 - UI: `http://localhost:3000/inbox`
 - Channel settings: `http://localhost:3000/settings/channels`
 - API proxy: web tarafı `/api/*` isteklerini `NEXT_PUBLIC_API_URL` (varsayılan `http://localhost:3001`) adresine yönlendirir.
@@ -269,6 +283,8 @@ pnpm dev
 - `NEXT_PUBLIC_*` değişkenleri build-time inline edilir; bu flag build sırasında set edilmelidir.
 - Prod build'lerde `NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS` set etmeyin (veya `false` bırakın), UI görünmez.
 - Tek organization üyeliğinde login sonrası otomatik org seçilir; çoklu üyelikte UI org seçimi ister.
+- DB tamamen boşsa login sayfası ilk owner + workspace bootstrap formunu gösterir.
+- Invite kabulünde mevcut kullanıcı önce giriş yapmalı; davet edilen e-posta ile açık oturum eşleşmiyorsa kabul edilmez.
 - Inbox sağ panel header'ında assign dropdown ile konuşma atama/atama kaldırma yapılır.
 
 ## Proje Yapısı

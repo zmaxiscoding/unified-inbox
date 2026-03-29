@@ -55,7 +55,7 @@ describe("InstagramGraphApiAdapter", () => {
 
     expect(result).toEqual({ providerMessageId: "mid.ig_abc123" });
     expect(global.fetch).toHaveBeenCalledWith(
-      "https://graph.instagram.com/v21.0/me/messages",
+      "https://graph.instagram.com/v21.0/ig_12345/messages",
       expect.objectContaining({
         method: "POST",
         headers: expect.objectContaining({

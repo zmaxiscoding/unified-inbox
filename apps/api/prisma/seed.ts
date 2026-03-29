@@ -7,8 +7,11 @@ import {
   OutboundMessageDeliveryStatus,
 } from "@prisma/client";
 import { createHash, randomBytes } from "node:crypto";
+import * as bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
+const DEMO_OWNER_PASSWORD = "OwnerPass123!";
+const DEMO_AGENT_PASSWORD = "AgentPass123!";
 
 async function main() {
   // Clean existing seed data (idempotent re-run)
@@ -20,12 +23,25 @@ async function main() {
     data: { name: "Acme Store", slug: "acme-store" },
   });
 
+  const [ownerPasswordHash, agentPasswordHash] = await Promise.all([
+    bcrypt.hash(DEMO_OWNER_PASSWORD, 12),
+    bcrypt.hash(DEMO_AGENT_PASSWORD, 12),
+  ]);
+
   // Users
   const owner = await prisma.user.create({
-    data: { email: "owner@acme.com", name: "Ali Yılmaz" },
+    data: {
+      email: "owner@acme.com",
+      name: "Ali Yılmaz",
+      passwordHash: ownerPasswordHash,
+    },
   });
   const agent = await prisma.user.create({
-    data: { email: "agent@acme.com", name: "Zeynep Demir" },
+    data: {
+      email: "agent@acme.com",
+      name: "Zeynep Demir",
+      passwordHash: agentPasswordHash,
+    },
   });
 
   // Memberships (create individually to capture IDs for conversation assignment)
@@ -186,6 +202,8 @@ async function main() {
   });
 
   console.log("Seed completed: 1 org, 2 users, 2 channels, 3 conversations, 4 messages, 2 tags, 1 note, 1 invitation, 3 audit logs");
+  console.log(`Seed login (owner): owner@acme.com / ${DEMO_OWNER_PASSWORD}`);
+  console.log(`Seed login (agent): agent@acme.com / ${DEMO_AGENT_PASSWORD}`);
   console.log(`Sample invite token (for testing): ${sampleToken}`);
 }
 

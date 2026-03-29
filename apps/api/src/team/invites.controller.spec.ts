@@ -1,9 +1,15 @@
-import { ArgumentMetadata, ValidationPipe } from "@nestjs/common";
+import {
+  ArgumentMetadata,
+  UnauthorizedException,
+  ValidationPipe,
+} from "@nestjs/common";
 import { Test, TestingModule } from "@nestjs/testing";
 import { Role } from "@prisma/client";
-import { Response } from "express";
+import { Request, Response } from "express";
+import { AuthService } from "../auth/auth.service";
 import { SessionPayload } from "../auth/auth.types";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
+import { SessionService } from "../auth/session.service";
 import { InvitesController } from "./invites.controller";
 import { TeamService } from "./team.service";
 import { CreateInviteDto } from "./dto/create-invite.dto";
@@ -18,6 +24,11 @@ describe("InvitesController", () => {
     getTeam: jest.Mock;
     updateMemberRole: jest.Mock;
     removeMember: jest.Mock;
+  };
+  let authService: { getSessionDetails: jest.Mock };
+  let sessionService: {
+    parseCookie: jest.Mock;
+    clearSessionCookie: jest.Mock;
   };
   const session: SessionPayload = {
     userId: "user_1",
@@ -35,10 +46,21 @@ describe("InvitesController", () => {
       updateMemberRole: jest.fn(),
       removeMember: jest.fn(),
     };
+    authService = {
+      getSessionDetails: jest.fn(),
+    };
+    sessionService = {
+      parseCookie: jest.fn(),
+      clearSessionCookie: jest.fn(() => "ui_session=; Max-Age=0"),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [InvitesController],
-      providers: [{ provide: TeamService, useValue: service }],
+      providers: [
+        { provide: TeamService, useValue: service },
+        { provide: AuthService, useValue: authService },
+        { provide: SessionService, useValue: sessionService },
+      ],
     })
       .overrideGuard(SessionAuthGuard)
       .useValue({ canActivate: () => true })
@@ -74,18 +96,84 @@ describe("InvitesController", () => {
       sessionPayload: { userId: "u1", organizationId: "org_1", iat: 1, exp: 2 },
       sessionCookie: "ui_session=signed_value",
     });
+    sessionService.parseCookie.mockReturnValue(null);
 
     const res = { setHeader: jest.fn() } as unknown as Response;
+    const req = { headers: {} } as Request;
     const result = await controller.acceptInvite(
       { token: "a".repeat(64) },
+      req,
       res,
     );
 
+    expect(service.acceptInvite).toHaveBeenCalledWith("a".repeat(64), {
+      currentSession: undefined,
+      name: undefined,
+      password: undefined,
+    });
     expect(res.setHeader).toHaveBeenCalledWith(
       "Set-Cookie",
       "ui_session=signed_value",
     );
     expect(result.user.email).toBe("new@acme.com");
+  });
+
+  it("should pass the authenticated session to invite acceptance", async () => {
+    service.acceptInvite.mockResolvedValue({
+      user: { id: "u1", name: "Existing", email: "existing@acme.com" },
+      organization: { id: "org_2", name: "Beta", slug: "beta" },
+      sessionPayload: { userId: "u1", organizationId: "org_2", iat: 1, exp: 2 },
+      sessionCookie: "ui_session=beta",
+    });
+    sessionService.parseCookie.mockReturnValue(session);
+    authService.getSessionDetails.mockResolvedValue({
+      user: { id: "u1", email: "existing@acme.com", name: "Existing" },
+      organization: { id: "org_1", name: "Acme", slug: "acme" },
+    });
+
+    const res = { setHeader: jest.fn() } as unknown as Response;
+    const req = {
+      headers: { cookie: "ui_session=signed" },
+    } as unknown as Request;
+
+    await controller.acceptInvite({ token: "b".repeat(64) }, req, res);
+
+    expect(service.acceptInvite).toHaveBeenCalledWith("b".repeat(64), {
+      currentSession: session,
+      name: undefined,
+      password: undefined,
+    });
+  });
+
+  it("should clear stale cookies before handling invite acceptance", async () => {
+    service.acceptInvite.mockResolvedValue({
+      user: { id: "u1", name: "New", email: "new@acme.com" },
+      organization: { id: "org_1", name: "Acme", slug: "acme" },
+      sessionPayload: { userId: "u1", organizationId: "org_1", iat: 1, exp: 2 },
+      sessionCookie: "ui_session=new_value",
+    });
+    sessionService.parseCookie.mockReturnValue(session);
+    authService.getSessionDetails.mockRejectedValue(
+      new UnauthorizedException("stale"),
+    );
+
+    const res = { setHeader: jest.fn() } as unknown as Response;
+    const req = {
+      headers: { cookie: "ui_session=stale" },
+    } as unknown as Request;
+
+    await controller.acceptInvite({ token: "c".repeat(64) }, req, res);
+
+    expect(res.setHeader).toHaveBeenNthCalledWith(
+      1,
+      "Set-Cookie",
+      "ui_session=; Max-Age=0",
+    );
+    expect(service.acceptInvite).toHaveBeenCalledWith("c".repeat(64), {
+      currentSession: undefined,
+      name: undefined,
+      password: undefined,
+    });
   });
 
   it("should revoke invite via service", async () => {

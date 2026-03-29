@@ -14,26 +14,27 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 - Docker compose config is valid: `docker compose config`
 - Local infra comes up: `docker compose up -d` (`postgres` + `redis` running)
 - DB schema is up to date: `pnpm db:migrate`
-- Seed runs and provides demo data: `pnpm db:seed` (1 org, 2 users, conversations, tags, notes, invites, audit logs)
+- Seed runs and provides password-backed demo data: `pnpm db:seed` (1 org, 2 users, conversations, tags, notes, invites, audit logs)
 - Lint passes: `pnpm lint`
 - Tests pass: `pnpm test`
 - Build passes: `pnpm build` (web + api)
 - One-command bootstrap: `pnpm demo:local` reaches `install -> setup -> migrate -> seed -> dev`
-- Smoke script: `scripts/smoke-local.sh` covers health -> login -> session -> conversations
+- Smoke script: `scripts/smoke-local.sh` covers health -> password login -> session -> conversations
 - Webhook pipeline: `persist -> queue -> worker` (WhatsApp + Instagram inbound)
 - Conversation resolve/reopen: API + UI + audit logging complete
 - Audit log web UI route is present in app: `/settings/audit-log`
 - SSE realtime updates: `GET /events/stream` pushes org-scoped events to inbox UI
-- Instagram outbound: send parity with WhatsApp via Instagram Graph API adapter
+- Instagram outbound: send parity with WhatsApp via account-scoped Instagram Graph API adapter
 - Token encryption: channel access tokens encrypted at rest; `CHANNEL_TOKEN_SECRET` required in production (fail-fast)
+- Auth: bcrypt-backed email/password login, one-time owner bootstrap, secure invite onboarding, legacy null-password activation via fresh invite, logout + session validation
 - SSE limitation: process-local only; does not work across multiple API instances or separate worker processes
 
 ## What Is Broken or Missing
 
 1. Real provider end-to-end verification:
    - WhatsApp/Instagram live send-receive requires real provider credentials.
-2. Security gaps:
-   - Auth email-only demo login; production-grade auth not yet implemented.
+2. Account recovery hardening:
+   - Password reset, email verification, and MFA are not implemented yet.
 3. Scalability:
    - SSE realtime bus is in-memory; needs Redis Pub/Sub for multi-process deployments.
 
@@ -42,7 +43,7 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 | # | Capability | Status | Notes |
 |---|------------|--------|-------|
 | 1 | Multi-tenant org/workspace isolation | Done | Session scoped by `organizationId`, DB queries tenant-scoped |
-| 2 | Role model (Owner/Agent) + authz | Partial | Owner gates on channels/audit/team ops; auth email-only demo login |
+| 2 | Role model (Owner/Agent) + authz | Done | Password login + session auth + owner gates + invite onboarding aligned, including legacy activation / re-invite compat |
 | 3 | Team workflows (invites, role update, remove member) | Done | Transaction + lock + last-owner protections |
 | 4 | Assignment / tags / internal notes | Done | API + UI present, audit for assignment exists |
 | 5 | Inbox list + conversation messages + outbound reply | Done | Endpoints + web inbox UI functional |
@@ -59,12 +60,12 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 
 ## MVP Progress
 
-Estimated MVP progress: **95%**
+Estimated MVP progress: **98%**
 
 Rationale:
-- All core backend domain, ingestion pipeline, conversation lifecycle, filters/search, audit log UI, realtime SSE, Instagram outbound, and token encryption are complete.
+- All core backend domain, ingestion pipeline, conversation lifecycle, filters/search, audit log UI, realtime SSE, Instagram outbound, token encryption, and password-backed auth are complete.
 - Bootstrap reproducibility is solid with runtime checks, smoke script, CI smoke, and one-command local demo.
-- Remaining gap: production-grade auth (currently email-only demo login).
+- Remaining gaps are account recovery features plus multi-process realtime fanout and real provider credentials.
 
 ## Single Roadmap + Todo System
 
@@ -80,10 +81,13 @@ Use this as the single source of truth, with milestones in [ROADMAP.md](./ROADMA
 - [x] Add SSE-based realtime update mechanism for inbox
 - [x] Add Instagram outbound sending + delivery parity
 - [x] Encrypt provider access tokens at rest (AES-256-GCM)
+- [x] Replace email-only demo login with password auth + owner bootstrap + secure invite onboarding
+- [x] Add invite-based compatibility path for legacy `passwordHash = null` users and zero-membership re-invites
 
 ### Next (P1)
 
-- [ ] Improve auth model beyond email-only demo login
+- [ ] Add password reset and email verification flow
+- [ ] Move SSE fanout from in-memory subjects to Redis Pub/Sub
 
 ### Later (P2)
 
@@ -122,6 +126,6 @@ Use this as the single source of truth, with milestones in [ROADMAP.md](./ROADMA
 ### Step 5 - Runtime & live proof
 - Done:
   - `docker compose up -d`, `pnpm db:migrate`, `pnpm db:seed`, `pnpm lint`, `pnpm test`, `pnpm build` başarıyla geçti.
-  - Canlı curl akışı: login -> OPEN -> RESOLVED -> OPEN doğrulandı.
+  - Canlı curl akışı: password login -> session -> OPEN -> RESOLVED -> OPEN doğrulandı.
 
 </details>

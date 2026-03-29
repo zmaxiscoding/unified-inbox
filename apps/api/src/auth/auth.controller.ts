@@ -13,6 +13,7 @@ import { Session } from "./session.decorator";
 import { SessionPayload } from "./auth.types";
 import { SessionAuthGuard } from "./session-auth.guard";
 import { AuthService } from "./auth.service";
+import { BootstrapOwnerDto } from "./dto/bootstrap-owner.dto";
 import { LoginDto } from "./dto/login.dto";
 import { SessionService } from "./session.service";
 
@@ -35,6 +36,26 @@ export class AuthController {
     res.setHeader("Set-Cookie", this.sessionService.createSessionCookie(result.session));
     return {
       requiresOrganizationSelection: false as const,
+      user: result.user,
+      organization: result.organization,
+    };
+  }
+
+  @Get("bootstrap/status")
+  getBootstrapStatus() {
+    return this.authService.getBootstrapStatus();
+  }
+
+  @Post("bootstrap")
+  @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
+  async bootstrap(
+    @Body() dto: BootstrapOwnerDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const result = await this.authService.bootstrapOwner(dto);
+
+    res.setHeader("Set-Cookie", this.sessionService.createSessionCookie(result.session));
+    return {
       user: result.user,
       organization: result.organization,
     };
