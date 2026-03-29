@@ -341,6 +341,7 @@ describe("TeamService", () => {
       id: "new_user_1",
       name: "New User",
       email: "new@acme.com",
+      sessionVersion: 0,
     });
     prisma.auditLog.create.mockResolvedValue({});
     sessionService.createSessionCookie.mockReturnValue("ui_session=...");
@@ -380,6 +381,7 @@ describe("TeamService", () => {
       name: "Existing User",
       email: "existing@acme.com",
       passwordHash: "hashed-password",
+      sessionVersion: 0,
     });
 
     await expect(service.acceptInvite("b".repeat(64))).rejects.toMatchObject({
@@ -401,12 +403,21 @@ describe("TeamService", () => {
       organizationId: "org_1",
       organization: { id: "org_1", name: "Acme", slug: "acme" },
     });
-    prisma.user.findUnique.mockResolvedValue({
-      id: "usr_legacy",
-      name: "Legacy User",
-      email: "legacy@acme.com",
-      passwordHash: null,
-    });
+    prisma.user.findUnique
+      .mockResolvedValueOnce({
+        id: "usr_legacy",
+        name: "Legacy User",
+        email: "legacy@acme.com",
+        passwordHash: null,
+        sessionVersion: 0,
+      })
+      .mockResolvedValueOnce({
+        id: "usr_legacy",
+        name: "Legacy User",
+        email: "legacy@acme.com",
+        passwordHash: "stored-hash",
+        sessionVersion: 1,
+      });
 
     await expect(service.acceptInvite("e".repeat(64))).rejects.toMatchObject({
       response: {
@@ -427,12 +438,21 @@ describe("TeamService", () => {
       organizationId: "org_1",
       organization: { id: "org_1", name: "Acme", slug: "acme" },
     });
-    prisma.user.findUnique.mockResolvedValue({
-      id: "usr_legacy",
-      name: "Legacy User",
-      email: "legacy@acme.com",
-      passwordHash: null,
-    });
+    prisma.user.findUnique
+      .mockResolvedValueOnce({
+        id: "usr_legacy",
+        name: "Legacy User",
+        email: "legacy@acme.com",
+        passwordHash: null,
+        sessionVersion: 0,
+      })
+      .mockResolvedValueOnce({
+        id: "usr_legacy",
+        name: "Legacy User",
+        email: "legacy@acme.com",
+        passwordHash: "stored-hash",
+        sessionVersion: 1,
+      });
     prisma.user.updateMany.mockResolvedValue({ count: 1 });
     prisma.auditLog.create.mockResolvedValue({});
     sessionService.createSessionCookie.mockReturnValue("ui_session=...");
@@ -448,12 +468,14 @@ describe("TeamService", () => {
       },
       data: {
         passwordHash: expect.any(String),
+        sessionVersion: { increment: 1 },
       },
     });
     expect(prisma.user.updateMany.mock.calls[0][0].data.passwordHash).not.toBe(
       "LegacyPass123!",
     );
     expect(result.user.email).toBe("legacy@acme.com");
+    expect(result.sessionPayload.sessionVersion).toBe(1);
     expect(prisma.membership.upsert).toHaveBeenCalled();
   });
 
@@ -475,6 +497,7 @@ describe("TeamService", () => {
         name: "Existing User",
         email: "existing@acme.com",
         passwordHash,
+        sessionVersion: 0,
       },
     });
     prisma.auditLog.create.mockResolvedValue({});
@@ -484,6 +507,7 @@ describe("TeamService", () => {
       currentSession: {
         userId: "usr_1",
         organizationId: "org_current",
+        sessionVersion: 0,
         iat: 1,
         exp: 2,
       },
@@ -511,6 +535,7 @@ describe("TeamService", () => {
         name: "Legacy User",
         email: "legacy@acme.com",
         passwordHash: null,
+        sessionVersion: 0,
       },
     });
 
@@ -519,6 +544,7 @@ describe("TeamService", () => {
         currentSession: {
           userId: "usr_legacy",
           organizationId: "org_current",
+          sessionVersion: 0,
           iat: 1,
           exp: 2,
         },
@@ -549,9 +575,17 @@ describe("TeamService", () => {
         name: "Legacy User",
         email: "legacy@acme.com",
         passwordHash: null,
+        sessionVersion: 0,
       },
     });
     prisma.user.updateMany.mockResolvedValue({ count: 1 });
+    prisma.user.findUnique.mockResolvedValue({
+      id: "usr_legacy",
+      name: "Legacy User",
+      email: "legacy@acme.com",
+      passwordHash: "stored-hash",
+      sessionVersion: 1,
+    });
     prisma.auditLog.create.mockResolvedValue({});
     sessionService.createSessionCookie.mockReturnValue("ui_session=...");
 
@@ -559,6 +593,7 @@ describe("TeamService", () => {
       currentSession: {
         userId: "usr_legacy",
         organizationId: "org_current",
+        sessionVersion: 0,
         iat: 1,
         exp: 2,
       },
@@ -572,9 +607,11 @@ describe("TeamService", () => {
       },
       data: {
         passwordHash: expect.any(String),
+        sessionVersion: { increment: 1 },
       },
     });
     expect(result.user.email).toBe("legacy@acme.com");
+    expect(result.sessionPayload.sessionVersion).toBe(1);
   });
 
   it("should accept invite for an existing zero-membership user after password verification", async () => {
@@ -594,6 +631,7 @@ describe("TeamService", () => {
       name: "Existing User",
       email: "existing@acme.com",
       passwordHash,
+      sessionVersion: 0,
     });
     prisma.auditLog.create.mockResolvedValue({});
     sessionService.createSessionCookie.mockReturnValue("ui_session=beta");
@@ -633,6 +671,7 @@ describe("TeamService", () => {
         name: "Other User",
         email: "other@acme.com",
         passwordHash: "hashed",
+        sessionVersion: 0,
       },
     });
 
@@ -641,6 +680,7 @@ describe("TeamService", () => {
         currentSession: {
           userId: "usr_2",
           organizationId: "org_current",
+          sessionVersion: 0,
           iat: 1,
           exp: 2,
         },
@@ -671,6 +711,7 @@ describe("TeamService", () => {
         currentSession: {
           userId: "usr_1",
           organizationId: "org_current",
+          sessionVersion: 0,
           iat: 1,
           exp: 2,
         },

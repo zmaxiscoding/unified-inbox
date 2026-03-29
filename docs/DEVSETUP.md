@@ -1,6 +1,6 @@
 # DEVSETUP
 
-Updated: 2026-03-05 (UTC)
+Updated: 2026-03-29 (UTC)
 
 ## Prerequisites
 
@@ -85,6 +85,19 @@ Invite onboarding notes:
 - Mevcut kullanıcı fresh invite ile doğrudan `password` doğrulayıp katılabilir; aktif membership sayısı `0` olsa da desteklenir.
 - Legacy `passwordHash = null` hesaplar passwordless login ile açılmaz; owner aynı e-posta için fresh invite üretir, kullanıcı invite akışında yeni şifre belirleyerek hesabı aktive eder.
 - Eğer org’daki tüm OWNER hesapları legacy/null-password durumda ve aktif session yoksa, `AUTH_RECOVERY_SECRET` tanımlayıp `POST /auth/recover-owner` ile ilk OWNER hesabını güvenli biçimde aktive edin.
+
+Password reset + email verification notes:
+- Development varsayılan transport `AUTH_EMAIL_TRANSPORT=outbox` olup preview dosyaları workspace script'lerinde çoğunlukla `apps/api/.auth-email-outbox/` altında oluşur.
+- Production için gerçek provider henüz yoktur; `AUTH_EMAIL_TRANSPORT=disabled` güvenli no-op davranışıdır.
+- Bu nedenle email verification enforcement bilerek soft bırakılmıştır; tracking + request/confirm + resend baseline aktiftir.
+- Password reset yalnızca password-backed hesaplar içindir; legacy `passwordHash = null` kullanıcılar fresh invite / owner recovery ile devam eder.
+
+Quick preview check:
+
+```bash
+find apps/api/.auth-email-outbox -type f | sort | tail -n 3
+cat apps/api/.auth-email-outbox/<preview-file>.json
+```
 
 ## Troubleshooting
 

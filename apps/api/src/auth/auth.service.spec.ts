@@ -7,6 +7,7 @@ import {
 import * as bcrypt from "bcryptjs";
 import { Role } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
+import { AuthEmailDeliveryService } from "./auth-email-delivery.service";
 import { AuthService } from "./auth.service";
 
 describe("AuthService", () => {
@@ -16,6 +17,17 @@ describe("AuthService", () => {
       findUnique: jest.Mock;
       create: jest.Mock;
       count: jest.Mock;
+      update: jest.Mock;
+      updateMany: jest.Mock;
+    };
+    passwordResetToken: {
+      findUnique: jest.Mock;
+      create: jest.Mock;
+      updateMany: jest.Mock;
+    };
+    emailVerificationToken: {
+      findUnique: jest.Mock;
+      create: jest.Mock;
       updateMany: jest.Mock;
     };
     membership: {
@@ -29,6 +41,10 @@ describe("AuthService", () => {
     $queryRaw: jest.Mock;
     $transaction: jest.Mock;
   };
+  let emailDelivery: {
+    getMode: jest.Mock;
+    send: jest.Mock;
+  };
 
   beforeEach(() => {
     prisma = {
@@ -36,6 +52,17 @@ describe("AuthService", () => {
         findUnique: jest.fn(),
         create: jest.fn(),
         count: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+      },
+      passwordResetToken: {
+        findUnique: jest.fn(),
+        create: jest.fn(),
+        updateMany: jest.fn(),
+      },
+      emailVerificationToken: {
+        findUnique: jest.fn(),
+        create: jest.fn(),
         updateMany: jest.fn(),
       },
       membership: {
@@ -60,9 +87,21 @@ describe("AuthService", () => {
       }),
     };
 
-    prisma.$queryRaw.mockResolvedValue([]);
+    emailDelivery = {
+      getMode: jest.fn().mockReturnValue("outbox"),
+      send: jest.fn().mockResolvedValue({ mode: "outbox", filePath: "/tmp/email.json" }),
+    };
 
-    service = new AuthService(prisma as unknown as PrismaService);
+    prisma.$queryRaw.mockResolvedValue([]);
+    prisma.passwordResetToken.updateMany.mockResolvedValue({ count: 1 });
+    prisma.emailVerificationToken.updateMany.mockResolvedValue({ count: 1 });
+    prisma.user.update.mockResolvedValue({});
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
+
+    service = new AuthService(
+      prisma as unknown as PrismaService,
+      emailDelivery as unknown as AuthEmailDeliveryService,
+    );
   });
 
   it("should log in with a valid password and single organization", async () => {
@@ -72,6 +111,7 @@ describe("AuthService", () => {
       email: "agent@acme.com",
       name: "Agent",
       passwordHash,
+      sessionVersion: 0,
       memberships: [
         {
           organizationId: "org_1",
@@ -89,6 +129,7 @@ describe("AuthService", () => {
     if (!result.requiresOrganizationSelection) {
       expect(result.organization.id).toBe("org_1");
       expect(result.session.userId).toBe("u1");
+      expect(result.session.sessionVersion).toBe(0);
     }
   });
 
@@ -99,6 +140,7 @@ describe("AuthService", () => {
       email: "agent@acme.com",
       name: "Agent",
       passwordHash,
+      sessionVersion: 0,
       memberships: [
         {
           organizationId: "org_1",
@@ -121,6 +163,7 @@ describe("AuthService", () => {
       email: "agent@acme.com",
       name: "Agent",
       passwordHash: null,
+      sessionVersion: 0,
       memberships: [
         {
           organizationId: "org_1",
@@ -150,6 +193,7 @@ describe("AuthService", () => {
       email: "agent@acme.com",
       name: "Agent",
       passwordHash,
+      sessionVersion: 0,
       memberships: [
         {
           organizationId: "org_1",
@@ -180,6 +224,7 @@ describe("AuthService", () => {
       email: "agent@acme.com",
       name: "Agent",
       passwordHash,
+      sessionVersion: 0,
       memberships: [
         {
           organizationId: "org_1",
@@ -220,6 +265,7 @@ describe("AuthService", () => {
       id: "user_1",
       email: "owner@acme.com",
       name: "Ali Yilmaz",
+      sessionVersion: 0,
     });
     prisma.membership.create.mockResolvedValue({
       id: "mem_1",
@@ -255,6 +301,7 @@ describe("AuthService", () => {
     );
     expect(result.organization.slug).toBe("acme-store");
     expect(result.session.organizationId).toBe("org_1");
+    expect(result.session.sessionVersion).toBe(0);
   });
 
   it("should reject bootstrap once the system already has data", async () => {
@@ -284,10 +331,18 @@ describe("AuthService", () => {
         email: "owner@acme.com",
         name: "Owner",
         passwordHash: null,
+        sessionVersion: 0,
       },
     });
     prisma.membership.count.mockResolvedValue(0);
     prisma.user.updateMany.mockResolvedValue({ count: 1 });
+    prisma.user.findUnique.mockResolvedValue({
+      id: "u1",
+      email: "owner@acme.com",
+      name: "Owner",
+      passwordHash: "stored-hash",
+      sessionVersion: 1,
+    });
     prisma.auditLog.create.mockResolvedValue({});
 
     const result = await service.recoverOwnerAccess({
@@ -304,10 +359,12 @@ describe("AuthService", () => {
       },
       data: {
         passwordHash: expect.any(String),
+        sessionVersion: { increment: 1 },
       },
     });
     expect(result.organization.slug).toBe("acme");
     expect(result.session.organizationId).toBe("org_1");
+    expect(result.session.sessionVersion).toBe(1);
 
     process.env.AUTH_RECOVERY_SECRET = previousSecret;
   });
@@ -340,6 +397,7 @@ describe("AuthService", () => {
         email: "owner@acme.com",
         name: "Owner",
         passwordHash: null,
+        sessionVersion: 0,
       },
     });
     prisma.membership.count.mockResolvedValue(1);
@@ -376,5 +434,391 @@ describe("AuthService", () => {
     ).rejects.toBeInstanceOf(NotFoundException);
 
     process.env.AUTH_RECOVERY_SECRET = previousSecret;
+  });
+
+  it("should return the same generic response for missing password reset emails", async () => {
+    prisma.user.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.requestPasswordReset({ email: "missing@acme.com" }),
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+
+    expect(prisma.passwordResetToken.create).not.toHaveBeenCalled();
+    expect(emailDelivery.send).not.toHaveBeenCalled();
+  });
+
+  it("should ignore password reset requests for legacy null-password users", async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: "u1",
+      email: "legacy@acme.com",
+      passwordHash: null,
+    });
+
+    await expect(
+      service.requestPasswordReset({ email: "legacy@acme.com" }),
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+
+    expect(prisma.passwordResetToken.create).not.toHaveBeenCalled();
+    expect(emailDelivery.send).not.toHaveBeenCalled();
+  });
+
+  it("should create, hash, and deliver a password reset token", async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: "u1",
+      email: "agent@acme.com",
+      passwordHash: "hashed-password",
+    });
+
+    await expect(
+      service.requestPasswordReset({ email: "agent@acme.com" }),
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+
+    expect(prisma.passwordResetToken.updateMany).toHaveBeenCalledWith({
+      where: {
+        userId: "u1",
+        usedAt: null,
+        invalidatedAt: null,
+      },
+      data: {
+        invalidatedAt: expect.any(Date),
+      },
+    });
+    expect(prisma.passwordResetToken.create).toHaveBeenCalledWith({
+      data: {
+        userId: "u1",
+        tokenHash: expect.any(String),
+        expiresAt: expect.any(Date),
+      },
+    });
+    expect(prisma.passwordResetToken.create.mock.calls[0][0].data.tokenHash).toHaveLength(
+      64,
+    );
+    expect(emailDelivery.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "password-reset",
+        to: "agent@acme.com",
+        subject: "Reset your Unified Inbox password",
+        actionUrl: expect.stringContaining("/password-reset?token="),
+      }),
+    );
+  });
+
+  it("should invalidate the fresh password reset token if delivery fails", async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: "u1",
+      email: "agent@acme.com",
+      passwordHash: "hashed-password",
+    });
+    emailDelivery.send.mockRejectedValue(new Error("outbox unavailable"));
+
+    await expect(
+      service.requestPasswordReset({ email: "agent@acme.com" }),
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+
+    expect(prisma.passwordResetToken.updateMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: expect.objectContaining({
+          tokenHash: expect.any(String),
+        }),
+        data: {
+          invalidatedAt: expect.any(Date),
+        },
+      }),
+    );
+  });
+
+  it("should no-op password reset requests when delivery is disabled", async () => {
+    emailDelivery.getMode.mockReturnValue("disabled");
+
+    await expect(
+      service.requestPasswordReset({ email: "agent@acme.com" }),
+    ).resolves.toEqual({ ok: true, deliveryMode: "disabled" });
+
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(emailDelivery.send).not.toHaveBeenCalled();
+  });
+
+  it("should reset the password and consume the token atomically", async () => {
+    prisma.passwordResetToken.findUnique.mockResolvedValue({
+      id: "prt_1",
+      userId: "u1",
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: null,
+      invalidatedAt: null,
+    });
+    prisma.passwordResetToken.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(
+      service.confirmPasswordReset({
+        token: "reset-token",
+        password: "NewPass123!",
+      }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(prisma.passwordResetToken.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "prt_1",
+        usedAt: null,
+        invalidatedAt: null,
+        expiresAt: {
+          gt: expect.any(Date),
+        },
+      },
+      data: {
+        usedAt: expect.any(Date),
+      },
+    });
+    expect(prisma.user.update).toHaveBeenCalledWith({
+      where: { id: "u1" },
+      data: {
+        passwordHash: expect.any(String),
+        sessionVersion: { increment: 1 },
+      },
+    });
+    expect(prisma.user.update.mock.calls[0][0].data.passwordHash).not.toBe(
+      "NewPass123!",
+    );
+  });
+
+  it("should reject invalid password reset tokens without hashing the password", async () => {
+    const hashSpy = jest.spyOn(bcrypt, "hash");
+    prisma.passwordResetToken.findUnique.mockResolvedValue(null);
+
+    try {
+      await expect(
+        service.confirmPasswordReset({
+          token: "missing-token",
+          password: "NewPass123!",
+        }),
+      ).rejects.toMatchObject({
+        response: {
+          message: "Invalid password reset token",
+        },
+      });
+
+      expect(hashSpy).not.toHaveBeenCalled();
+    } finally {
+      hashSpy.mockRestore();
+    }
+  });
+
+  it("should reject expired password reset tokens", async () => {
+    prisma.passwordResetToken.findUnique.mockResolvedValue({
+      id: "prt_1",
+      userId: "u1",
+      expiresAt: new Date(Date.now() - 1_000),
+      usedAt: null,
+      invalidatedAt: null,
+    });
+
+    await expect(
+      service.confirmPasswordReset({
+        token: "reset-token",
+        password: "NewPass123!",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        message: "Password reset link has expired",
+      },
+    });
+  });
+
+  it("should reject reused password reset tokens", async () => {
+    prisma.passwordResetToken.findUnique.mockResolvedValue({
+      id: "prt_1",
+      userId: "u1",
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: new Date(),
+      invalidatedAt: null,
+    });
+
+    await expect(
+      service.confirmPasswordReset({
+        token: "reset-token",
+        password: "NewPass123!",
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        message: "Password reset link has already been used",
+      },
+    });
+  });
+
+  it("should return the same generic response for missing email verification emails", async () => {
+    prisma.user.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.requestEmailVerification({ email: "missing@acme.com" }),
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+
+    expect(prisma.emailVerificationToken.create).not.toHaveBeenCalled();
+    expect(emailDelivery.send).not.toHaveBeenCalled();
+  });
+
+  it("should no-op email verification requests for already verified users", async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: "u1",
+      email: "agent@acme.com",
+      emailVerifiedAt: new Date(),
+    });
+
+    await expect(
+      service.requestEmailVerification({ email: "agent@acme.com" }),
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+
+    expect(prisma.emailVerificationToken.create).not.toHaveBeenCalled();
+    expect(emailDelivery.send).not.toHaveBeenCalled();
+  });
+
+  it("should create and deliver an email verification token", async () => {
+    prisma.user.findUnique.mockResolvedValue({
+      id: "u1",
+      email: "agent@acme.com",
+      emailVerifiedAt: null,
+    });
+
+    await expect(
+      service.requestEmailVerification({ email: "agent@acme.com" }),
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+
+    expect(prisma.emailVerificationToken.updateMany).toHaveBeenCalledWith({
+      where: {
+        userId: "u1",
+        usedAt: null,
+        invalidatedAt: null,
+      },
+      data: {
+        invalidatedAt: expect.any(Date),
+      },
+    });
+    expect(prisma.emailVerificationToken.create).toHaveBeenCalledWith({
+      data: {
+        userId: "u1",
+        tokenHash: expect.any(String),
+        expiresAt: expect.any(Date),
+      },
+    });
+    expect(emailDelivery.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "email-verification",
+        to: "agent@acme.com",
+        subject: "Verify your Unified Inbox email",
+        actionUrl: expect.stringContaining("/email-verification?token="),
+      }),
+    );
+  });
+
+  it("should no-op email verification requests when delivery is disabled", async () => {
+    emailDelivery.getMode.mockReturnValue("disabled");
+
+    await expect(
+      service.requestEmailVerification({ email: "agent@acme.com" }),
+    ).resolves.toEqual({ ok: true, deliveryMode: "disabled" });
+
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("should verify the email and consume the token atomically", async () => {
+    prisma.emailVerificationToken.findUnique.mockResolvedValue({
+      id: "evt_1",
+      userId: "u1",
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: null,
+      invalidatedAt: null,
+    });
+    prisma.emailVerificationToken.updateMany.mockResolvedValue({ count: 1 });
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
+
+    await expect(
+      service.confirmEmailVerification({ token: "verify-token" }),
+    ).resolves.toEqual({ ok: true });
+
+    expect(prisma.emailVerificationToken.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "evt_1",
+        usedAt: null,
+        invalidatedAt: null,
+        expiresAt: {
+          gt: expect.any(Date),
+        },
+      },
+      data: {
+        usedAt: expect.any(Date),
+      },
+    });
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "u1",
+        emailVerifiedAt: null,
+      },
+      data: {
+        emailVerifiedAt: expect.any(Date),
+      },
+    });
+  });
+
+  it("should reject expired email verification tokens", async () => {
+    prisma.emailVerificationToken.findUnique.mockResolvedValue({
+      id: "evt_1",
+      userId: "u1",
+      expiresAt: new Date(Date.now() - 1_000),
+      usedAt: null,
+      invalidatedAt: null,
+    });
+
+    await expect(
+      service.confirmEmailVerification({ token: "verify-token" }),
+    ).rejects.toMatchObject({
+      response: {
+        message: "Email verification link has expired",
+      },
+    });
+  });
+
+  it("should reject reused email verification tokens", async () => {
+    prisma.emailVerificationToken.findUnique.mockResolvedValue({
+      id: "evt_1",
+      userId: "u1",
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: new Date(),
+      invalidatedAt: null,
+    });
+
+    await expect(
+      service.confirmEmailVerification({ token: "verify-token" }),
+    ).rejects.toMatchObject({
+      response: {
+        message: "Email verification link has already been used",
+      },
+    });
+  });
+
+  it("should reject sessions when the session version no longer matches the user", async () => {
+    prisma.membership.findUnique.mockResolvedValue({
+      role: Role.OWNER,
+      user: {
+        id: "u1",
+        email: "agent@acme.com",
+        name: "Agent",
+        emailVerifiedAt: null,
+        sessionVersion: 2,
+      },
+      organization: {
+        id: "org_1",
+        name: "Acme",
+        slug: "acme",
+      },
+    });
+
+    await expect(
+      service.getSessionDetails({
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 1,
+        iat: 1,
+        exp: 2,
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });

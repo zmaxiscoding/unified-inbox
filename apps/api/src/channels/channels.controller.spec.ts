@@ -18,6 +18,7 @@ describe("ChannelsController", () => {
   const session: SessionPayload = {
     userId: "user_1",
     organizationId: "org_1",
+    sessionVersion: 0,
     role: "OWNER",
     iat: 1,
     exp: 2,

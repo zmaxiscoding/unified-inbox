@@ -24,6 +24,7 @@ describe("EventsController", () => {
     const session = {
       userId: "user_1",
       organizationId: "org_1",
+      sessionVersion: 0,
       iat: 0,
       exp: 0,
     };

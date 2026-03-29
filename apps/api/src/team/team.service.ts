@@ -256,6 +256,7 @@ export class TeamService {
             id: string;
             name: string;
             email: string;
+            sessionVersion: number;
           }
         | undefined;
       let existingUser:
@@ -264,6 +265,7 @@ export class TeamService {
             name: string;
             email: string;
             passwordHash: string | null;
+            sessionVersion: number;
           }
         | undefined;
 
@@ -282,6 +284,7 @@ export class TeamService {
                 name: true,
                 email: true,
                 passwordHash: true,
+                sessionVersion: true,
               },
             },
           },
@@ -304,7 +307,13 @@ export class TeamService {
         existingUser =
           (await tx.user.findUnique({
             where: { email: invitation.email },
-            select: { id: true, name: true, email: true, passwordHash: true },
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              passwordHash: true,
+              sessionVersion: true,
+            },
           })) ?? undefined;
       }
 
@@ -324,7 +333,7 @@ export class TeamService {
               name,
               passwordHash,
             },
-            select: { id: true, name: true, email: true },
+            select: { id: true, name: true, email: true, sessionVersion: true },
           });
         } catch (error) {
           if (!this.isUniqueConstraintViolation(error)) {
@@ -334,7 +343,13 @@ export class TeamService {
           existingUser =
             (await tx.user.findUnique({
               where: { email: invitation.email },
-              select: { id: true, name: true, email: true, passwordHash: true },
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                passwordHash: true,
+                sessionVersion: true,
+              },
             })) ?? undefined;
 
           if (!existingUser) {
@@ -366,6 +381,7 @@ export class TeamService {
             id: existingUser.id,
             name: existingUser.name,
             email: existingUser.email,
+            sessionVersion: existingUser.sessionVersion,
           };
         } else {
           if (!password) {
@@ -383,18 +399,25 @@ export class TeamService {
             },
             data: {
               passwordHash,
+              sessionVersion: { increment: 1 },
             },
           });
 
-          if (activation.count !== 1) {
-            const refreshedUser = await tx.user.findUnique({
-              where: { id: existingUser.id },
-              select: { id: true, name: true, email: true, passwordHash: true },
-            });
-            if (!refreshedUser?.passwordHash) {
-              throw new ConflictException("Account activation could not be completed");
-            }
+          const refreshedUser = await tx.user.findUnique({
+            where: { id: existingUser.id },
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              passwordHash: true,
+              sessionVersion: true,
+            },
+          });
+          if (!refreshedUser?.passwordHash) {
+            throw new ConflictException("Account activation could not be completed");
+          }
 
+          if (activation.count !== 1) {
             const passwordMatches = await bcrypt.compare(
               password,
               refreshedUser.passwordHash,
@@ -407,12 +430,14 @@ export class TeamService {
               id: refreshedUser.id,
               name: refreshedUser.name,
               email: refreshedUser.email,
+              sessionVersion: refreshedUser.sessionVersion,
             };
           } else {
             user = {
-              id: existingUser.id,
-              name: existingUser.name,
-              email: existingUser.email,
+              id: refreshedUser.id,
+              name: refreshedUser.name,
+              email: refreshedUser.email,
+              sessionVersion: refreshedUser.sessionVersion,
             };
           }
         }
@@ -491,6 +516,7 @@ export class TeamService {
     const sessionPayload: SessionPayload = {
       userId: acceptResult.user.id,
       organizationId: acceptResult.organizationId,
+      sessionVersion: acceptResult.user.sessionVersion,
       iat: nowSeconds,
       exp: nowSeconds + SESSION_TTL_SECONDS,
     };

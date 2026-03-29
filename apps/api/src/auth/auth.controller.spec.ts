@@ -5,7 +5,11 @@ import { AuthController } from "./auth.controller";
 import { AuthService } from "./auth.service";
 import { SessionPayload } from "./auth.types";
 import { BootstrapOwnerDto } from "./dto/bootstrap-owner.dto";
+import { EmailVerificationConfirmDto } from "./dto/email-verification-confirm.dto";
+import { EmailVerificationRequestDto } from "./dto/email-verification-request.dto";
 import { LoginDto } from "./dto/login.dto";
+import { PasswordResetConfirmDto } from "./dto/password-reset-confirm.dto";
+import { PasswordResetRequestDto } from "./dto/password-reset-request.dto";
 import { RecoverOwnerDto } from "./dto/recover-owner.dto";
 import { SessionAuthGuard } from "./session-auth.guard";
 import { SessionService } from "./session.service";
@@ -17,6 +21,10 @@ describe("AuthController", () => {
     getBootstrapStatus: jest.Mock;
     bootstrapOwner: jest.Mock;
     recoverOwnerAccess: jest.Mock;
+    requestPasswordReset: jest.Mock;
+    confirmPasswordReset: jest.Mock;
+    requestEmailVerification: jest.Mock;
+    confirmEmailVerification: jest.Mock;
     getSessionDetails: jest.Mock;
   };
   let sessionService: {
@@ -30,6 +38,10 @@ describe("AuthController", () => {
       getBootstrapStatus: jest.fn(),
       bootstrapOwner: jest.fn(),
       recoverOwnerAccess: jest.fn(),
+      requestPasswordReset: jest.fn(),
+      confirmPasswordReset: jest.fn(),
+      requestEmailVerification: jest.fn(),
+      confirmEmailVerification: jest.fn(),
       getSessionDetails: jest.fn(),
     };
     sessionService = {
@@ -56,7 +68,13 @@ describe("AuthController", () => {
       requiresOrganizationSelection: false,
       user: { id: "u1", email: "agent@acme.com", name: "Agent" },
       organization: { id: "org_1", name: "Acme", slug: "acme" },
-      session: { userId: "u1", organizationId: "org_1", iat: 1, exp: 2 },
+      session: {
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      },
     });
     sessionService.createSessionCookie.mockReturnValue("ui_session=signed");
 
@@ -103,7 +121,13 @@ describe("AuthController", () => {
     authService.bootstrapOwner.mockResolvedValue({
       user: { id: "u1", email: "owner@acme.com", name: "Owner" },
       organization: { id: "org_1", name: "Acme", slug: "acme" },
-      session: { userId: "u1", organizationId: "org_1", iat: 1, exp: 2 },
+      session: {
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      },
     });
     sessionService.createSessionCookie.mockReturnValue("ui_session=bootstrap");
 
@@ -142,7 +166,13 @@ describe("AuthController", () => {
     authService.recoverOwnerAccess.mockResolvedValue({
       user: { id: "u1", email: "owner@acme.com", name: "Owner" },
       organization: { id: "org_1", name: "Acme", slug: "acme" },
-      session: { userId: "u1", organizationId: "org_1", iat: 1, exp: 2 },
+      session: {
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      },
     });
     sessionService.createSessionCookie.mockReturnValue("ui_session=recovered");
 
@@ -168,17 +198,82 @@ describe("AuthController", () => {
     const session: SessionPayload = {
       userId: "u1",
       organizationId: "org_1",
+      sessionVersion: 0,
       iat: 1,
       exp: 2,
     };
     authService.getSessionDetails.mockResolvedValue({
-      user: { id: "u1", email: "agent@acme.com", name: "Agent" },
+      user: {
+        id: "u1",
+        email: "agent@acme.com",
+        name: "Agent",
+        emailVerifiedAt: null,
+      },
       organization: { id: "org_1", name: "Acme", slug: "acme" },
     });
 
     await expect(controller.session(session)).resolves.toEqual({
-      user: { id: "u1", email: "agent@acme.com", name: "Agent" },
+      user: {
+        id: "u1",
+        email: "agent@acme.com",
+        name: "Agent",
+        emailVerifiedAt: null,
+      },
       organization: { id: "org_1", name: "Acme", slug: "acme" },
+    });
+  });
+
+  it("should proxy password reset request to the service", async () => {
+    authService.requestPasswordReset.mockResolvedValue({
+      ok: true,
+      deliveryMode: "outbox",
+    });
+
+    await expect(
+      controller.requestPasswordReset({ email: "agent@acme.com" }),
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+    expect(authService.requestPasswordReset).toHaveBeenCalledWith({
+      email: "agent@acme.com",
+    });
+  });
+
+  it("should proxy password reset confirm to the service", async () => {
+    authService.confirmPasswordReset.mockResolvedValue({ ok: true });
+
+    await expect(
+      controller.confirmPasswordReset({
+        token: "reset-token",
+        password: "NewPass123!",
+      }),
+    ).resolves.toEqual({ ok: true });
+    expect(authService.confirmPasswordReset).toHaveBeenCalledWith({
+      token: "reset-token",
+      password: "NewPass123!",
+    });
+  });
+
+  it("should proxy email verification request to the service", async () => {
+    authService.requestEmailVerification.mockResolvedValue({
+      ok: true,
+      deliveryMode: "outbox",
+    });
+
+    await expect(
+      controller.requestEmailVerification({ email: "agent@acme.com" }),
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+    expect(authService.requestEmailVerification).toHaveBeenCalledWith({
+      email: "agent@acme.com",
+    });
+  });
+
+  it("should proxy email verification confirm to the service", async () => {
+    authService.confirmEmailVerification.mockResolvedValue({ ok: true });
+
+    await expect(
+      controller.confirmEmailVerification({ token: "verify-token" }),
+    ).resolves.toEqual({ ok: true });
+    expect(authService.confirmEmailVerification).toHaveBeenCalledWith({
+      token: "verify-token",
     });
   });
 
@@ -256,6 +351,89 @@ describe("AuthController", () => {
       email: "owner@acme.com",
       password: "OwnerPass123!",
       recoverySecret: "top-secret",
+    });
+  });
+
+  it("should validate password reset request payloads", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: PasswordResetRequestDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ email: "agent@acme.com" }, metadata),
+    ).resolves.toEqual({
+      email: "agent@acme.com",
+    });
+  });
+
+  it("should validate password reset confirm payloads", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: PasswordResetConfirmDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform(
+        {
+          token: "reset-token",
+          password: "NewPass123!",
+        },
+        metadata,
+      ),
+    ).resolves.toEqual({
+      token: "reset-token",
+      password: "NewPass123!",
+    });
+  });
+
+  it("should validate email verification request payloads", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: EmailVerificationRequestDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ email: "agent@acme.com" }, metadata),
+    ).resolves.toEqual({
+      email: "agent@acme.com",
+    });
+  });
+
+  it("should validate email verification confirm payloads", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: EmailVerificationConfirmDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ token: "verify-token" }, metadata),
+    ).resolves.toEqual({
+      token: "verify-token",
     });
   });
 });

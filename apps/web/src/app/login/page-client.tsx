@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -58,6 +59,13 @@ export default function LoginPageClient({
   const [bootstrapPassword, setBootstrapPassword] = useState("OwnerPass123!");
   const [bootstrapOrganizationName, setBootstrapOrganizationName] =
     useState("Acme Store");
+  const normalizedEmail = email.trim();
+  const passwordResetHref = normalizedEmail
+    ? `/password-reset?email=${encodeURIComponent(normalizedEmail)}`
+    : "/password-reset";
+  const emailVerificationHref = normalizedEmail
+    ? `/email-verification?email=${encodeURIComponent(normalizedEmail)}`
+    : "/email-verification";
 
   const completeLogin = async (organizationId?: string) => {
     setIsLoading(true);
@@ -350,6 +358,15 @@ export default function LoginPageClient({
                   className="mt-1 h-11 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
                 />
               </label>
+
+              <div className="flex items-center justify-between text-xs text-slate-500">
+                <Link href={passwordResetHref} className="hover:text-slate-700">
+                  Şifremi unuttum
+                </Link>
+                <Link href={emailVerificationHref} className="hover:text-slate-700">
+                  Doğrulama linkini tekrar gönder
+                </Link>
+              </div>
 
               <button
                 type="submit"

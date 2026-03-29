@@ -20,6 +20,7 @@ describe("MembershipsController", () => {
   const session: SessionPayload = {
     userId: "user_1",
     organizationId: "org_1",
+    sessionVersion: 0,
     iat: 1,
     exp: 2,
   };
