@@ -24,6 +24,7 @@ describe("AuthController", () => {
     requestPasswordReset: jest.Mock;
     confirmPasswordReset: jest.Mock;
     requestEmailVerification: jest.Mock;
+    resendEmailVerification: jest.Mock;
     confirmEmailVerification: jest.Mock;
     getSessionDetails: jest.Mock;
   };
@@ -41,6 +42,7 @@ describe("AuthController", () => {
       requestPasswordReset: jest.fn(),
       confirmPasswordReset: jest.fn(),
       requestEmailVerification: jest.fn(),
+      resendEmailVerification: jest.fn(),
       confirmEmailVerification: jest.fn(),
       getSessionDetails: jest.fn(),
     };
@@ -203,6 +205,7 @@ describe("AuthController", () => {
       exp: 2,
     };
     authService.getSessionDetails.mockResolvedValue({
+      emailVerificationMode: "soft",
       user: {
         id: "u1",
         email: "agent@acme.com",
@@ -220,6 +223,7 @@ describe("AuthController", () => {
         emailVerifiedAt: null,
       },
       organization: { id: "org_1", name: "Acme", slug: "acme" },
+      emailVerificationMode: "soft",
     });
   });
 
@@ -227,11 +231,16 @@ describe("AuthController", () => {
     authService.requestPasswordReset.mockResolvedValue({
       ok: true,
       deliveryMode: "outbox",
+      requestState: "accepted",
     });
 
     await expect(
       controller.requestPasswordReset({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "outbox",
+      requestState: "accepted",
+    });
     expect(authService.requestPasswordReset).toHaveBeenCalledWith({
       email: "agent@acme.com",
     });
@@ -256,14 +265,41 @@ describe("AuthController", () => {
     authService.requestEmailVerification.mockResolvedValue({
       ok: true,
       deliveryMode: "outbox",
+      requestState: "accepted",
     });
 
     await expect(
       controller.requestEmailVerification({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "outbox",
+      requestState: "accepted",
+    });
     expect(authService.requestEmailVerification).toHaveBeenCalledWith({
       email: "agent@acme.com",
     });
+  });
+
+  it("should proxy authenticated email verification resend to the service", async () => {
+    const session: SessionPayload = {
+      userId: "u1",
+      organizationId: "org_1",
+      sessionVersion: 0,
+      iat: 1,
+      exp: 2,
+    };
+    authService.resendEmailVerification.mockResolvedValue({
+      ok: true,
+      deliveryMode: "resend",
+      deliveryState: "sent",
+    });
+
+    await expect(controller.resendEmailVerification(session)).resolves.toEqual({
+      ok: true,
+      deliveryMode: "resend",
+      deliveryState: "sent",
+    });
+    expect(authService.resendEmailVerification).toHaveBeenCalledWith(session);
   });
 
   it("should proxy email verification confirm to the service", async () => {

@@ -99,6 +99,12 @@ export class AuthController {
     return this.authService.requestEmailVerification(dto);
   }
 
+  @Post("email-verification/resend")
+  @UseGuards(SessionAuthGuard)
+  resendEmailVerification(@Session() session: SessionPayload) {
+    return this.authService.resendEmailVerification(session);
+  }
+
   @Post("email-verification/confirm")
   @UsePipes(new ValidationPipe({ whitelist: true, transform: true }))
   confirmEmailVerification(@Body() dto: EmailVerificationConfirmDto) {
@@ -119,6 +125,7 @@ export class AuthController {
     return {
       user: details.user,
       organization: details.organization,
+      emailVerificationMode: details.emailVerificationMode,
     };
   }
 }

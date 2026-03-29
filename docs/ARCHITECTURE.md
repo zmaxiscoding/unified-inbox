@@ -27,6 +27,7 @@ Updated: 2026-03-29 (UTC)
 ## Auth & Onboarding
 
 - `POST /auth/login` validates `email + password` against `users.passwordHash` (bcrypt)
+- `AUTH_EMAIL_VERIFICATION_MODE=login` blocks new login attempts for users whose `emailVerifiedAt` is still null; default `soft` mode keeps login permissive
 - Legacy users with `passwordHash = null` cannot use passwordless fallback; login returns an activation-required error and they must complete a fresh invite-based activation
 - `POST /auth/bootstrap` creates the first workspace, first user, and OWNER membership only when the DB is empty
 - Bootstrap is serialized with a DB advisory lock so only one first-owner transaction can win
@@ -34,9 +35,12 @@ Updated: 2026-03-29 (UTC)
 - `POST /auth/password-reset/request` is account-enumeration safe; for password-backed users it creates a hashed, expiring, single-use token and dispatches via the configured auth email transport
 - `POST /auth/password-reset/confirm` consumes the token atomically and writes a fresh bcrypt password hash
 - `POST /auth/email-verification/request` is account-enumeration safe; for unverified users it creates a hashed, expiring, single-use token and dispatches via the configured auth email transport
+- `POST /auth/email-verification/resend` is session-authenticated and can surface the real delivery outcome because enumeration is not a concern there
 - `POST /auth/email-verification/confirm` consumes the token atomically and persists `users.emailVerifiedAt`
-- Current rollout keeps email verification enforcement soft to avoid bricking existing tenants; legacy password-backed users are backfilled as verified during migration, while new accounts can verify asynchronously
-- Current provider-agnostic transport is a file-backed outbox preview in development (`apps/api/.auth-email-outbox/` when using workspace scripts); production can safely leave transport disabled until a real provider is wired
+- Current rollout keeps email verification soft by default to avoid bricking existing tenants; legacy password-backed users are backfilled as verified during migration, while new accounts can verify asynchronously and later move under the explicit `login` gate
+- Auth email delivery stays provider-agnostic with `disabled`, `outbox`, and `resend` transports. `outbox` writes preview JSON in development, while `resend` delivers real email with provider idempotency keys derived from the token record id
+- Safety guard: `AUTH_EMAIL_VERIFICATION_MODE=login` is incompatible with `AUTH_EMAIL_TRANSPORT=disabled`; the app fails fast on startup instead of allowing a lockout configuration
+- If delivery fails after token creation, the fresh password reset / verification token is immediately invalidated so no unusable active token remains behind
 - Invite onboarding:
   - new email: invite token + `name + password` creates the user, links membership, consumes the invite, and issues a session
   - existing email with a password: invite token + current password verifies the account, links membership, consumes the invite, and issues a session even if the user currently has zero memberships

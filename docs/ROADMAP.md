@@ -76,12 +76,10 @@ Delivered:
 - Instagram outbound sending via Instagram Graph API adapter
 - Channel access token encryption at rest (AES-256-GCM, env-based key)
 - Password-backed login, one-time owner bootstrap, invite-based account activation, legacy/zero-membership re-invite compatibility, and owner cold-start recovery
-- Password reset request/confirm, email verification tracking + resend/confirm baseline, and dev outbox email preview
+- Password reset request/confirm, email verification tracking + resend/confirm baseline, dev outbox email preview, Resend transport baseline, and explicit `soft|login` verification gate
 
 Remaining Tasks:
 - [ ] Expand audit event coverage for all critical mutations
-- [ ] Replace auth outbox transport with a real email provider
-- [ ] Decide whether/when to hard-enforce verified email on login or settings mutations
 - [ ] Replace process-local SSE transport with Redis Pub/Sub
 
 ## Release Gate for MVP

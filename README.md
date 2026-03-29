@@ -56,14 +56,35 @@ pnpm smoke:local      # API health + login + session + conversations smoke testi
 
 ## Auth Recovery Baseline
 
-- `POST /auth/password-reset/request|confirm` ve `POST /auth/email-verification/request|confirm` endpoint'leri eklidir.
-- Request endpoint'leri account-enumeration safe davranır; mevcut / olmayan e-posta için aynı başarılı cevap döner.
+- `POST /auth/password-reset/request|confirm`, `POST /auth/email-verification/request|confirm` ve authenticated `POST /auth/email-verification/resend` endpoint'leri eklidir.
+- Public request endpoint'leri account-enumeration safe davranır; mevcut / olmayan e-posta için aynı generic başarılı cevap döner.
 - Token'lar DB'de plaintext tutulmaz; `sha256` digest + expiry + single-use consume kullanılır.
 - Legacy `passwordHash = null` hesaplar password reset ile aktive edilmez; bu hesaplar fresh invite veya `POST /auth/recover-owner` ile devam eder.
-- E-posta gönderimi için henüz gerçek provider entegrasyonu yoktur.
-  - Development: varsayılan transport `outbox` ve preview dosyaları repo kökündeki `.auth-email-outbox/` altında oluşur.
-    Workspace script'leriyle bu pratikte çoğunlukla `apps/api/.auth-email-outbox/` olur.
-  - Production: `AUTH_EMAIL_TRANSPORT=disabled` bırakılırsa endpoint'ler generic/no-op kalır; bu yüzden email verification enforcement bilerek soft tutulur.
+- E-posta delivery provider-agnostic transport ile çalışır:
+  - `AUTH_EMAIL_TRANSPORT=disabled`: güvenli no-op, public endpoint'ler generic kalır
+  - `AUTH_EMAIL_TRANSPORT=outbox`: local preview dosyaları üretir
+  - `AUTH_EMAIL_TRANSPORT=resend`: gerçek delivery için Resend adapter'ı kullanır
+- `AUTH_EMAIL_FROM` etkin transport'larda gönderici adresidir. `RESEND_API_KEY` yalnızca `resend` modunda gereklidir.
+- Verification rollout gate'i explicit config ile kontrol edilir:
+  - `AUTH_EMAIL_VERIFICATION_MODE=soft` varsayılan ve düşük-risk davranıştır
+  - `AUTH_EMAIL_VERIFICATION_MODE=login` yeni login'lerde doğrulanmamış hesapları bloklar
+- Guard: `AUTH_EMAIL_VERIFICATION_MODE=login` ile `AUTH_EMAIL_TRANSPORT=disabled` birlikte açılamaz; app startup'ta fail-fast olur.
+- Legacy password-backed kullanıcılar migration sırasında verified backfill aldığı için `login` gate rollout'unda yanlışlıkla brick edilmez.
+
+## Auth Email Config
+
+```bash
+# apps/api/.env
+AUTH_EMAIL_TRANSPORT=outbox   # disabled | outbox | resend
+AUTH_EMAIL_FROM="Unified Inbox <no-reply@example.test>"
+AUTH_EMAIL_OUTBOX_DIR=.auth-email-outbox
+AUTH_EMAIL_VERIFICATION_MODE=soft   # soft | login
+RESEND_API_KEY=
+```
+
+Notes:
+- `outbox` development için en düşük riskli default'tur; preview dosyaları çalışma dizinine göre çoğunlukla `apps/api/.auth-email-outbox/` altında oluşur.
+- Public password reset / verification request sayfaları teslim sonucunu özellikle generic gösterir; inbox banner'daki authenticated resend ise gerçek outcome'u daha net yansıtır.
 
 ## API Örnekleri
 
@@ -84,7 +105,7 @@ curl -i -c cookie.txt -X POST http://localhost:3001/auth/recover-owner \
   -H "Content-Type: application/json" \
   -d '{"organizationSlug":"acme-store","email":"owner@acme.com","password":"OwnerPass123!","recoverySecret":"<AUTH_RECOVERY_SECRET>"}'
 
-# Password reset request (her zaman generic başarılı cevap döner)
+# Password reset request (her zaman generic/accepted cevap döner)
 curl -i -X POST http://localhost:3001/auth/password-reset/request \
   -H "Content-Type: application/json" \
   -d '{"email":"agent@acme.com"}'
@@ -94,7 +115,7 @@ curl -i -X POST http://localhost:3001/auth/password-reset/confirm \
   -H "Content-Type: application/json" \
   -d '{"token":"<reset_token>","password":"NewAgentPass123!"}'
 
-# Email verification request (her zaman generic başarılı cevap döner)
+# Email verification request (her zaman generic/accepted cevap döner)
 curl -i -X POST http://localhost:3001/auth/email-verification/request \
   -H "Content-Type: application/json" \
   -d '{"email":"agent@acme.com"}'
@@ -106,6 +127,9 @@ curl -i -X POST http://localhost:3001/auth/email-verification/confirm \
 
 # Oturum bilgisi
 curl -b cookie.txt http://localhost:3001/auth/session
+
+# Authenticated email verification resend (gercek delivery sonucu doner)
+curl -b cookie.txt -X POST http://localhost:3001/auth/email-verification/resend
 
 # Konuşmaları listele (auth gerekli)
 curl -b cookie.txt http://localhost:3001/conversations

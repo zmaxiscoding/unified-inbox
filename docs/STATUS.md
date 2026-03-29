@@ -26,8 +26,8 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 - SSE realtime updates: `GET /events/stream` pushes org-scoped events to inbox UI
 - Instagram outbound: send parity with WhatsApp via account-scoped Instagram Graph API adapter
 - Token encryption: channel access tokens encrypted at rest; `CHANNEL_TOKEN_SECRET` required in production (fail-fast)
-- Auth: bcrypt-backed email/password login, one-time owner bootstrap, secure invite onboarding, legacy null-password activation via fresh invite, cold-start owner recovery via `AUTH_RECOVERY_SECRET`, password reset request/confirm, soft email verification request/confirm, logout + session validation
-- Auth email delivery baseline: development outbox preview files at `apps/api/.auth-email-outbox/` via workspace scripts; no real provider wired yet
+- Auth: bcrypt-backed email/password login, one-time owner bootstrap, secure invite onboarding, legacy null-password activation via fresh invite, cold-start owner recovery via `AUTH_RECOVERY_SECRET`, password reset request/confirm, email verification request/resend/confirm, explicit `soft|login` verification gate, logout + session validation
+- Auth email delivery: provider-agnostic `disabled|outbox|resend` transport with development outbox preview files and Resend production baseline
 - SSE limitation: process-local only; does not work across multiple API instances or separate worker processes
 
 ## What Is Broken or Missing
@@ -35,8 +35,6 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 1. Real provider end-to-end verification:
    - WhatsApp/Instagram live send-receive requires real provider credentials.
 2. Account recovery follow-up:
-   - Real email provider transport is not implemented yet.
-   - Email verification enforcement is intentionally soft; current rollout tracks state and supports resend/confirm without blocking login.
    - MFA is not implemented yet.
 3. Scalability:
    - SSE realtime bus is in-memory; needs Redis Pub/Sub for multi-process deployments.
@@ -46,7 +44,7 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 | # | Capability | Status | Notes |
 |---|------------|--------|-------|
 | 1 | Multi-tenant org/workspace isolation | Done | Session scoped by `organizationId`, DB queries tenant-scoped |
-| 2 | Role model (Owner/Agent) + authz | Done | Password login + session auth + owner gates + invite onboarding aligned, including legacy activation / re-invite compat, owner cold-start recovery, password reset, and soft email verification baseline |
+| 2 | Role model (Owner/Agent) + authz | Done | Password login + session auth + owner gates + invite onboarding aligned, including legacy activation / re-invite compat, owner cold-start recovery, password reset, Resend/outbox auth email delivery baseline, and explicit soft/login verification gate |
 | 3 | Team workflows (invites, role update, remove member) | Done | Transaction + lock + last-owner protections |
 | 4 | Assignment / tags / internal notes | Done | API + UI present, audit for assignment exists |
 | 5 | Inbox list + conversation messages + outbound reply | Done | Endpoints + web inbox UI functional |
@@ -63,12 +61,12 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 
 ## MVP Progress
 
-Estimated MVP progress: **98%**
+Estimated MVP progress: **99%**
 
 Rationale:
 - All core backend domain, ingestion pipeline, conversation lifecycle, filters/search, audit log UI, realtime SSE, Instagram outbound, token encryption, and password-backed auth are complete.
 - Bootstrap reproducibility is solid with runtime checks, smoke script, CI smoke, and one-command local demo.
-- Remaining gaps are real email provider delivery / optional verification enforcement, multi-process realtime fanout, and real provider credentials.
+- Remaining gaps are multi-process realtime fanout, real provider credentials for live channel demos, and MFA.
 
 ## Single Roadmap + Todo System
 
@@ -90,7 +88,7 @@ Use this as the single source of truth, with milestones in [ROADMAP.md](./ROADMA
 ### Next (P1)
 
 - [x] Add password reset and email verification flow
-- [ ] Replace auth email outbox transport with a real provider and decide enforcement gate
+- [x] Replace auth email outbox transport with a real provider and decide enforcement gate
 - [ ] Move SSE fanout from in-memory subjects to Redis Pub/Sub
 
 ### Later (P2)
