@@ -54,6 +54,7 @@ export class AuthService {
         email: true,
         name: true,
         passwordHash: true,
+        sessionVersion: true,
         memberships: {
           select: {
             organizationId: true,
@@ -126,6 +127,7 @@ export class AuthService {
       session: {
         userId: user.id,
         organizationId: selectedMembership.organizationId,
+        sessionVersion: user.sessionVersion,
         iat: nowSeconds,
         exp: nowSeconds + SESSION_TTL_SECONDS,
       } satisfies SessionPayload,
@@ -139,8 +141,10 @@ export class AuthService {
   }
 
   async requestPasswordReset(dto: PasswordResetRequestDto) {
-    if (!this.authEmailDelivery.isEnabled()) {
-      return { ok: true };
+    const deliveryMode = this.authEmailDelivery.getMode();
+
+    if (deliveryMode === "disabled") {
+      return { ok: true, deliveryMode };
     }
 
     const email = dto.email.trim().toLowerCase();
@@ -154,7 +158,7 @@ export class AuthService {
     });
 
     if (!user?.passwordHash) {
-      return { ok: true };
+      return { ok: true, deliveryMode };
     }
 
     const now = new Date();
@@ -185,7 +189,7 @@ export class AuthService {
       });
     } catch (error) {
       if (this.isActiveAuthTokenUniqueViolation(error)) {
-        return { ok: true };
+        return { ok: true, deliveryMode };
       }
 
       throw error;
@@ -212,12 +216,11 @@ export class AuthService {
       });
     }
 
-    return { ok: true };
+    return { ok: true, deliveryMode };
   }
 
   async confirmPasswordReset(dto: PasswordResetConfirmDto) {
     const tokenHash = this.hashToken(dto.token.trim());
-    const passwordHash = await bcrypt.hash(dto.password, PASSWORD_HASH_ROUNDS);
 
     await this.prisma.$transaction(async (tx) => {
       const resetToken = await tx.passwordResetToken.findUnique({
@@ -281,10 +284,12 @@ export class AuthService {
         throw new ConflictException("Password reset could not be completed");
       }
 
+      const passwordHash = await bcrypt.hash(dto.password, PASSWORD_HASH_ROUNDS);
       await tx.user.update({
         where: { id: resetToken.userId },
         data: {
           passwordHash,
+          sessionVersion: { increment: 1 },
         },
       });
     });
@@ -293,8 +298,10 @@ export class AuthService {
   }
 
   async requestEmailVerification(dto: EmailVerificationRequestDto) {
-    if (!this.authEmailDelivery.isEnabled()) {
-      return { ok: true };
+    const deliveryMode = this.authEmailDelivery.getMode();
+
+    if (deliveryMode === "disabled") {
+      return { ok: true, deliveryMode };
     }
 
     const email = dto.email.trim().toLowerCase();
@@ -308,7 +315,7 @@ export class AuthService {
     });
 
     if (!user || user.emailVerifiedAt) {
-      return { ok: true };
+      return { ok: true, deliveryMode };
     }
 
     const now = new Date();
@@ -339,7 +346,7 @@ export class AuthService {
       });
     } catch (error) {
       if (this.isActiveAuthTokenUniqueViolation(error)) {
-        return { ok: true };
+        return { ok: true, deliveryMode };
       }
 
       throw error;
@@ -366,7 +373,7 @@ export class AuthService {
       });
     }
 
-    return { ok: true };
+    return { ok: true, deliveryMode };
   }
 
   async confirmEmailVerification(dto: EmailVerificationConfirmDto) {
@@ -492,6 +499,7 @@ export class AuthService {
           id: true,
           email: true,
           name: true,
+          sessionVersion: true,
         },
       });
 
@@ -518,11 +526,16 @@ export class AuthService {
 
     const nowSeconds = Math.floor(Date.now() / 1000);
     return {
-      user: result.user,
+      user: {
+        id: result.user.id,
+        email: result.user.email,
+        name: result.user.name,
+      },
       organization: result.organization,
       session: {
         userId: result.user.id,
         organizationId: result.organization.id,
+        sessionVersion: result.user.sessionVersion,
         iat: nowSeconds,
         exp: nowSeconds + SESSION_TTL_SECONDS,
       } satisfies SessionPayload,
@@ -565,6 +578,7 @@ export class AuthService {
               email: true,
               name: true,
               passwordHash: true,
+              sessionVersion: true,
             },
           },
         },
@@ -619,6 +633,7 @@ export class AuthService {
             email: true,
             name: true,
             passwordHash: true,
+            sessionVersion: true,
           },
         });
 
@@ -636,6 +651,7 @@ export class AuthService {
             id: refreshedUser.id,
             email: refreshedUser.email,
             name: refreshedUser.name,
+            sessionVersion: refreshedUser.sessionVersion,
           },
           organization: targetOwnerMembership.organization,
         };
@@ -656,6 +672,7 @@ export class AuthService {
           id: targetOwnerMembership.user.id,
           email: targetOwnerMembership.user.email,
           name: targetOwnerMembership.user.name,
+          sessionVersion: targetOwnerMembership.user.sessionVersion,
         },
         organization: targetOwnerMembership.organization,
       };
@@ -663,11 +680,16 @@ export class AuthService {
 
     const nowSeconds = Math.floor(Date.now() / 1000);
     return {
-      user: result.user,
+      user: {
+        id: result.user.id,
+        email: result.user.email,
+        name: result.user.name,
+      },
       organization: result.organization,
       session: {
         userId: result.user.id,
         organizationId: result.organization.id,
+        sessionVersion: result.user.sessionVersion,
         iat: nowSeconds,
         exp: nowSeconds + SESSION_TTL_SECONDS,
       } satisfies SessionPayload,
@@ -690,6 +712,7 @@ export class AuthService {
             email: true,
             name: true,
             emailVerifiedAt: true,
+            sessionVersion: true,
           },
         },
         organization: {
@@ -705,8 +728,20 @@ export class AuthService {
     if (!membership) {
       throw new UnauthorizedException("Invalid session");
     }
+    if (membership.user.sessionVersion !== session.sessionVersion) {
+      throw new UnauthorizedException("Invalid session");
+    }
 
-    return membership;
+    return {
+      role: membership.role,
+      user: {
+        id: membership.user.id,
+        email: membership.user.email,
+        name: membership.user.name,
+        emailVerifiedAt: membership.user.emailVerifiedAt,
+      },
+      organization: membership.organization,
+    };
   }
 
   private async isBootstrapAvailable(db: AuthDbClient) {

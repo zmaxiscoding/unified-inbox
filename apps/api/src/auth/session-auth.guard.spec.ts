@@ -34,6 +34,7 @@ describe("SessionAuthGuard", () => {
     sessionService.parseCookie.mockReturnValue({
       userId: "u1",
       organizationId: "org_1",
+      sessionVersion: 0,
       iat: 1,
       exp: 2,
     });
@@ -86,6 +87,7 @@ describe("SessionAuthGuard", () => {
     const parsedSession = {
       userId: "u1",
       organizationId: "org_1",
+      sessionVersion: 0,
       iat: 1,
       exp: 2,
     };

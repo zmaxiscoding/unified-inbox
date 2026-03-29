@@ -33,6 +33,7 @@ describe("InvitesController", () => {
   const session: SessionPayload = {
     userId: "user_1",
     organizationId: "org_1",
+    sessionVersion: 0,
     iat: 1,
     exp: 2,
   };
@@ -93,7 +94,13 @@ describe("InvitesController", () => {
     service.acceptInvite.mockResolvedValue({
       user: { id: "u1", name: "New", email: "new@acme.com" },
       organization: { id: "org_1", name: "Acme", slug: "acme" },
-      sessionPayload: { userId: "u1", organizationId: "org_1", iat: 1, exp: 2 },
+      sessionPayload: {
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      },
       sessionCookie: "ui_session=signed_value",
     });
     sessionService.parseCookie.mockReturnValue(null);
@@ -122,7 +129,13 @@ describe("InvitesController", () => {
     service.acceptInvite.mockResolvedValue({
       user: { id: "u1", name: "Existing", email: "existing@acme.com" },
       organization: { id: "org_2", name: "Beta", slug: "beta" },
-      sessionPayload: { userId: "u1", organizationId: "org_2", iat: 1, exp: 2 },
+      sessionPayload: {
+        userId: "u1",
+        organizationId: "org_2",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      },
       sessionCookie: "ui_session=beta",
     });
     sessionService.parseCookie.mockReturnValue(session);
@@ -149,7 +162,13 @@ describe("InvitesController", () => {
     service.acceptInvite.mockResolvedValue({
       user: { id: "u1", name: "New", email: "new@acme.com" },
       organization: { id: "org_1", name: "Acme", slug: "acme" },
-      sessionPayload: { userId: "u1", organizationId: "org_1", iat: 1, exp: 2 },
+      sessionPayload: {
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      },
       sessionCookie: "ui_session=new_value",
     });
     sessionService.parseCookie.mockReturnValue(session);

@@ -341,6 +341,7 @@ describe("TeamService", () => {
       id: "new_user_1",
       name: "New User",
       email: "new@acme.com",
+      sessionVersion: 0,
     });
     prisma.auditLog.create.mockResolvedValue({});
     sessionService.createSessionCookie.mockReturnValue("ui_session=...");
@@ -380,6 +381,7 @@ describe("TeamService", () => {
       name: "Existing User",
       email: "existing@acme.com",
       passwordHash: "hashed-password",
+      sessionVersion: 0,
     });
 
     await expect(service.acceptInvite("b".repeat(64))).rejects.toMatchObject({
@@ -406,6 +408,7 @@ describe("TeamService", () => {
       name: "Legacy User",
       email: "legacy@acme.com",
       passwordHash: null,
+      sessionVersion: 0,
     });
 
     await expect(service.acceptInvite("e".repeat(64))).rejects.toMatchObject({
@@ -432,6 +435,7 @@ describe("TeamService", () => {
       name: "Legacy User",
       email: "legacy@acme.com",
       passwordHash: null,
+      sessionVersion: 0,
     });
     prisma.user.updateMany.mockResolvedValue({ count: 1 });
     prisma.auditLog.create.mockResolvedValue({});
@@ -475,6 +479,7 @@ describe("TeamService", () => {
         name: "Existing User",
         email: "existing@acme.com",
         passwordHash,
+        sessionVersion: 0,
       },
     });
     prisma.auditLog.create.mockResolvedValue({});
@@ -484,6 +489,7 @@ describe("TeamService", () => {
       currentSession: {
         userId: "usr_1",
         organizationId: "org_current",
+        sessionVersion: 0,
         iat: 1,
         exp: 2,
       },
@@ -511,6 +517,7 @@ describe("TeamService", () => {
         name: "Legacy User",
         email: "legacy@acme.com",
         passwordHash: null,
+        sessionVersion: 0,
       },
     });
 
@@ -519,6 +526,7 @@ describe("TeamService", () => {
         currentSession: {
           userId: "usr_legacy",
           organizationId: "org_current",
+          sessionVersion: 0,
           iat: 1,
           exp: 2,
         },
@@ -549,6 +557,7 @@ describe("TeamService", () => {
         name: "Legacy User",
         email: "legacy@acme.com",
         passwordHash: null,
+        sessionVersion: 0,
       },
     });
     prisma.user.updateMany.mockResolvedValue({ count: 1 });
@@ -559,6 +568,7 @@ describe("TeamService", () => {
       currentSession: {
         userId: "usr_legacy",
         organizationId: "org_current",
+        sessionVersion: 0,
         iat: 1,
         exp: 2,
       },
@@ -594,6 +604,7 @@ describe("TeamService", () => {
       name: "Existing User",
       email: "existing@acme.com",
       passwordHash,
+      sessionVersion: 0,
     });
     prisma.auditLog.create.mockResolvedValue({});
     sessionService.createSessionCookie.mockReturnValue("ui_session=beta");
@@ -633,6 +644,7 @@ describe("TeamService", () => {
         name: "Other User",
         email: "other@acme.com",
         passwordHash: "hashed",
+        sessionVersion: 0,
       },
     });
 
@@ -641,6 +653,7 @@ describe("TeamService", () => {
         currentSession: {
           userId: "usr_2",
           organizationId: "org_current",
+          sessionVersion: 0,
           iat: 1,
           exp: 2,
         },
@@ -671,6 +684,7 @@ describe("TeamService", () => {
         currentSession: {
           userId: "usr_1",
           organizationId: "org_current",
+          sessionVersion: 0,
           iat: 1,
           exp: 2,
         },

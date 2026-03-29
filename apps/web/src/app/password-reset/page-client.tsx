@@ -16,6 +16,11 @@ const getErrorMessage = async (response: Response, fallback: string) => {
   return body.message;
 };
 
+type AuthLinkRequestResponse = {
+  ok: boolean;
+  deliveryMode?: "outbox" | "disabled";
+};
+
 export default function PasswordResetPageClient({
   token,
   initialEmail,
@@ -52,9 +57,19 @@ export default function PasswordResetPageClient({
         );
       }
 
-      setSuccessMessage(
-        "Bu e-posta ile bir hesap varsa, şifre sıfırlama linki gönderildi.",
-      );
+      const body = (await response.json().catch(() => null)) as
+        | AuthLinkRequestResponse
+        | null;
+
+      if (body?.deliveryMode === "disabled") {
+        setSuccessMessage(
+          "Bu ortamda e-posta gönderimi kapalı olduğu için şifre sıfırlama linki otomatik gönderilemiyor.",
+        );
+      } else {
+        setSuccessMessage(
+          "Bu e-posta ile bir hesap varsa, şifre sıfırlama linki hazırlandı. Outbox preview dosyasını kontrol edebilirsiniz.",
+        );
+      }
     } catch (error) {
       setErrorMessage(
         error instanceof Error

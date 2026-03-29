@@ -40,6 +40,10 @@ export class AuthEmailDeliveryService {
     return this.transport === "outbox";
   }
 
+  getMode() {
+    return this.transport;
+  }
+
   async send(message: AuthEmailMessage) {
     if (this.transport !== "outbox") {
       return { mode: "disabled" as const };

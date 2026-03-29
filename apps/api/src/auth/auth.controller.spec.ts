@@ -68,7 +68,13 @@ describe("AuthController", () => {
       requiresOrganizationSelection: false,
       user: { id: "u1", email: "agent@acme.com", name: "Agent" },
       organization: { id: "org_1", name: "Acme", slug: "acme" },
-      session: { userId: "u1", organizationId: "org_1", iat: 1, exp: 2 },
+      session: {
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      },
     });
     sessionService.createSessionCookie.mockReturnValue("ui_session=signed");
 
@@ -115,7 +121,13 @@ describe("AuthController", () => {
     authService.bootstrapOwner.mockResolvedValue({
       user: { id: "u1", email: "owner@acme.com", name: "Owner" },
       organization: { id: "org_1", name: "Acme", slug: "acme" },
-      session: { userId: "u1", organizationId: "org_1", iat: 1, exp: 2 },
+      session: {
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      },
     });
     sessionService.createSessionCookie.mockReturnValue("ui_session=bootstrap");
 
@@ -154,7 +166,13 @@ describe("AuthController", () => {
     authService.recoverOwnerAccess.mockResolvedValue({
       user: { id: "u1", email: "owner@acme.com", name: "Owner" },
       organization: { id: "org_1", name: "Acme", slug: "acme" },
-      session: { userId: "u1", organizationId: "org_1", iat: 1, exp: 2 },
+      session: {
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      },
     });
     sessionService.createSessionCookie.mockReturnValue("ui_session=recovered");
 
@@ -180,6 +198,7 @@ describe("AuthController", () => {
     const session: SessionPayload = {
       userId: "u1",
       organizationId: "org_1",
+      sessionVersion: 0,
       iat: 1,
       exp: 2,
     };
@@ -205,11 +224,14 @@ describe("AuthController", () => {
   });
 
   it("should proxy password reset request to the service", async () => {
-    authService.requestPasswordReset.mockResolvedValue({ ok: true });
+    authService.requestPasswordReset.mockResolvedValue({
+      ok: true,
+      deliveryMode: "outbox",
+    });
 
     await expect(
       controller.requestPasswordReset({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
     expect(authService.requestPasswordReset).toHaveBeenCalledWith({
       email: "agent@acme.com",
     });
@@ -231,11 +253,14 @@ describe("AuthController", () => {
   });
 
   it("should proxy email verification request to the service", async () => {
-    authService.requestEmailVerification.mockResolvedValue({ ok: true });
+    authService.requestEmailVerification.mockResolvedValue({
+      ok: true,
+      deliveryMode: "outbox",
+    });
 
     await expect(
       controller.requestEmailVerification({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
     expect(authService.requestEmailVerification).toHaveBeenCalledWith({
       email: "agent@acme.com",
     });

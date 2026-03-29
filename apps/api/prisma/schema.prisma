@@ -35,6 +35,7 @@ model User {
   email        String   @unique
   name         String
   passwordHash String?
+  sessionVersion Int    @default(0)
   emailVerifiedAt DateTime?
   avatarUrl    String?
   createdAt    DateTime @default(now())

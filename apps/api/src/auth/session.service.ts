@@ -72,17 +72,37 @@ export class SessionService {
     try {
       const parsed = JSON.parse(
         Buffer.from(encoded, "base64url").toString("utf8"),
-      ) as SessionPayload;
+      ) as Partial<SessionPayload>;
 
       if (!parsed.userId || !parsed.organizationId) return null;
       if (typeof parsed.exp !== "number" || !Number.isFinite(parsed.exp)) {
+        return null;
+      }
+      if (typeof parsed.iat !== "number" || !Number.isFinite(parsed.iat)) {
+        return null;
+      }
+
+      const sessionVersion =
+        parsed.sessionVersion === undefined ? 0 : parsed.sessionVersion;
+      if (
+        typeof sessionVersion !== "number" ||
+        !Number.isInteger(sessionVersion) ||
+        sessionVersion < 0
+      ) {
         return null;
       }
 
       const nowSeconds = Math.floor(Date.now() / 1000);
       if (parsed.exp < nowSeconds) return null;
 
-      return parsed;
+      return {
+        userId: parsed.userId,
+        organizationId: parsed.organizationId,
+        sessionVersion,
+        role: parsed.role,
+        iat: parsed.iat,
+        exp: parsed.exp,
+      };
     } catch {
       return null;
     }

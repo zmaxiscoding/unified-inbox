@@ -60,6 +60,11 @@ type SessionInfo = {
   };
 };
 
+type AuthLinkRequestResponse = {
+  ok: boolean;
+  deliveryMode?: "outbox" | "disabled";
+};
+
 type OrganizationMember = {
   membershipId: string;
   name: string;
@@ -337,9 +342,19 @@ export default function InboxPage() {
         throw new Error(`Verification request failed: ${response.status}`);
       }
 
-      setVerificationMessage(
-        "Doğrulama linki gönderildi. Dev ortamında local outbox preview dosyasını kontrol edin.",
-      );
+      const body = (await response.json().catch(() => null)) as
+        | AuthLinkRequestResponse
+        | null;
+
+      if (body?.deliveryMode === "disabled") {
+        setVerificationMessage(
+          "Bu ortamda e-posta gönderimi kapalı. Doğrulama linki otomatik gönderilemiyor.",
+        );
+      } else {
+        setVerificationMessage(
+          "Doğrulama linki hazırlandı. Outbox preview dosyasını kontrol edin.",
+        );
+      }
     } catch {
       setVerificationMessage("Doğrulama linki şu anda gönderilemedi.");
     } finally {

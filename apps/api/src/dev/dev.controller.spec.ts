@@ -31,7 +31,13 @@ describe("DevController", () => {
   it("should call devService.simulateInbound with session orgId and dto", async () => {
     devService.simulateInbound.mockResolvedValue({ ok: true, rawWebhookEventId: "rwe_1" });
 
-    const session = { userId: "u1", organizationId: "org_1", iat: 0, exp: 0 };
+    const session = {
+      userId: "u1",
+      organizationId: "org_1",
+      sessionVersion: 0,
+      iat: 0,
+      exp: 0,
+    };
     const dto = { text: "Hello from customer" } as SimulateInboundDto;
 
     const result = await controller.simulateInbound(session, dto);
@@ -47,7 +53,13 @@ describe("DevController", () => {
   it("should pass customerDisplay when provided", async () => {
     devService.simulateInbound.mockResolvedValue({ ok: true, rawWebhookEventId: "rwe_2" });
 
-    const session = { userId: "u1", organizationId: "org_1", iat: 0, exp: 0 };
+    const session = {
+      userId: "u1",
+      organizationId: "org_1",
+      sessionVersion: 0,
+      iat: 0,
+      exp: 0,
+    };
     const dto = { text: "Test message", customerDisplay: "905551112233" } as SimulateInboundDto;
 
     await controller.simulateInbound(session, dto);

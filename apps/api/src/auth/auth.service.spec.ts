@@ -42,7 +42,7 @@ describe("AuthService", () => {
     $transaction: jest.Mock;
   };
   let emailDelivery: {
-    isEnabled: jest.Mock;
+    getMode: jest.Mock;
     send: jest.Mock;
   };
 
@@ -88,7 +88,7 @@ describe("AuthService", () => {
     };
 
     emailDelivery = {
-      isEnabled: jest.fn().mockReturnValue(true),
+      getMode: jest.fn().mockReturnValue("outbox"),
       send: jest.fn().mockResolvedValue({ mode: "outbox", filePath: "/tmp/email.json" }),
     };
 
@@ -111,6 +111,7 @@ describe("AuthService", () => {
       email: "agent@acme.com",
       name: "Agent",
       passwordHash,
+      sessionVersion: 0,
       memberships: [
         {
           organizationId: "org_1",
@@ -128,6 +129,7 @@ describe("AuthService", () => {
     if (!result.requiresOrganizationSelection) {
       expect(result.organization.id).toBe("org_1");
       expect(result.session.userId).toBe("u1");
+      expect(result.session.sessionVersion).toBe(0);
     }
   });
 
@@ -138,6 +140,7 @@ describe("AuthService", () => {
       email: "agent@acme.com",
       name: "Agent",
       passwordHash,
+      sessionVersion: 0,
       memberships: [
         {
           organizationId: "org_1",
@@ -160,6 +163,7 @@ describe("AuthService", () => {
       email: "agent@acme.com",
       name: "Agent",
       passwordHash: null,
+      sessionVersion: 0,
       memberships: [
         {
           organizationId: "org_1",
@@ -189,6 +193,7 @@ describe("AuthService", () => {
       email: "agent@acme.com",
       name: "Agent",
       passwordHash,
+      sessionVersion: 0,
       memberships: [
         {
           organizationId: "org_1",
@@ -219,6 +224,7 @@ describe("AuthService", () => {
       email: "agent@acme.com",
       name: "Agent",
       passwordHash,
+      sessionVersion: 0,
       memberships: [
         {
           organizationId: "org_1",
@@ -259,6 +265,7 @@ describe("AuthService", () => {
       id: "user_1",
       email: "owner@acme.com",
       name: "Ali Yilmaz",
+      sessionVersion: 0,
     });
     prisma.membership.create.mockResolvedValue({
       id: "mem_1",
@@ -294,6 +301,7 @@ describe("AuthService", () => {
     );
     expect(result.organization.slug).toBe("acme-store");
     expect(result.session.organizationId).toBe("org_1");
+    expect(result.session.sessionVersion).toBe(0);
   });
 
   it("should reject bootstrap once the system already has data", async () => {
@@ -323,6 +331,7 @@ describe("AuthService", () => {
         email: "owner@acme.com",
         name: "Owner",
         passwordHash: null,
+        sessionVersion: 0,
       },
     });
     prisma.membership.count.mockResolvedValue(0);
@@ -347,6 +356,7 @@ describe("AuthService", () => {
     });
     expect(result.organization.slug).toBe("acme");
     expect(result.session.organizationId).toBe("org_1");
+    expect(result.session.sessionVersion).toBe(0);
 
     process.env.AUTH_RECOVERY_SECRET = previousSecret;
   });
@@ -379,6 +389,7 @@ describe("AuthService", () => {
         email: "owner@acme.com",
         name: "Owner",
         passwordHash: null,
+        sessionVersion: 0,
       },
     });
     prisma.membership.count.mockResolvedValue(1);
@@ -422,7 +433,7 @@ describe("AuthService", () => {
 
     await expect(
       service.requestPasswordReset({ email: "missing@acme.com" }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
 
     expect(prisma.passwordResetToken.create).not.toHaveBeenCalled();
     expect(emailDelivery.send).not.toHaveBeenCalled();
@@ -437,7 +448,7 @@ describe("AuthService", () => {
 
     await expect(
       service.requestPasswordReset({ email: "legacy@acme.com" }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
 
     expect(prisma.passwordResetToken.create).not.toHaveBeenCalled();
     expect(emailDelivery.send).not.toHaveBeenCalled();
@@ -452,7 +463,7 @@ describe("AuthService", () => {
 
     await expect(
       service.requestPasswordReset({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
 
     expect(prisma.passwordResetToken.updateMany).toHaveBeenCalledWith({
       where: {
@@ -494,7 +505,7 @@ describe("AuthService", () => {
 
     await expect(
       service.requestPasswordReset({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
 
     expect(prisma.passwordResetToken.updateMany).toHaveBeenNthCalledWith(
       2,
@@ -510,11 +521,11 @@ describe("AuthService", () => {
   });
 
   it("should no-op password reset requests when delivery is disabled", async () => {
-    emailDelivery.isEnabled.mockReturnValue(false);
+    emailDelivery.getMode.mockReturnValue("disabled");
 
     await expect(
       service.requestPasswordReset({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, deliveryMode: "disabled" });
 
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
     expect(emailDelivery.send).not.toHaveBeenCalled();
@@ -554,11 +565,34 @@ describe("AuthService", () => {
       where: { id: "u1" },
       data: {
         passwordHash: expect.any(String),
+        sessionVersion: { increment: 1 },
       },
     });
     expect(prisma.user.update.mock.calls[0][0].data.passwordHash).not.toBe(
       "NewPass123!",
     );
+  });
+
+  it("should reject invalid password reset tokens without hashing the password", async () => {
+    const hashSpy = jest.spyOn(bcrypt, "hash");
+    prisma.passwordResetToken.findUnique.mockResolvedValue(null);
+
+    try {
+      await expect(
+        service.confirmPasswordReset({
+          token: "missing-token",
+          password: "NewPass123!",
+        }),
+      ).rejects.toMatchObject({
+        response: {
+          message: "Invalid password reset token",
+        },
+      });
+
+      expect(hashSpy).not.toHaveBeenCalled();
+    } finally {
+      hashSpy.mockRestore();
+    }
   });
 
   it("should reject expired password reset tokens", async () => {
@@ -608,7 +642,7 @@ describe("AuthService", () => {
 
     await expect(
       service.requestEmailVerification({ email: "missing@acme.com" }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
 
     expect(prisma.emailVerificationToken.create).not.toHaveBeenCalled();
     expect(emailDelivery.send).not.toHaveBeenCalled();
@@ -623,7 +657,7 @@ describe("AuthService", () => {
 
     await expect(
       service.requestEmailVerification({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
 
     expect(prisma.emailVerificationToken.create).not.toHaveBeenCalled();
     expect(emailDelivery.send).not.toHaveBeenCalled();
@@ -638,7 +672,7 @@ describe("AuthService", () => {
 
     await expect(
       service.requestEmailVerification({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, deliveryMode: "outbox" });
 
     expect(prisma.emailVerificationToken.updateMany).toHaveBeenCalledWith({
       where: {
@@ -668,11 +702,11 @@ describe("AuthService", () => {
   });
 
   it("should no-op email verification requests when delivery is disabled", async () => {
-    emailDelivery.isEnabled.mockReturnValue(false);
+    emailDelivery.getMode.mockReturnValue("disabled");
 
     await expect(
       service.requestEmailVerification({ email: "agent@acme.com" }),
-    ).resolves.toEqual({ ok: true });
+    ).resolves.toEqual({ ok: true, deliveryMode: "disabled" });
 
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
   });
@@ -750,5 +784,33 @@ describe("AuthService", () => {
         message: "Email verification link has already been used",
       },
     });
+  });
+
+  it("should reject sessions when the session version no longer matches the user", async () => {
+    prisma.membership.findUnique.mockResolvedValue({
+      role: Role.OWNER,
+      user: {
+        id: "u1",
+        email: "agent@acme.com",
+        name: "Agent",
+        emailVerifiedAt: null,
+        sessionVersion: 2,
+      },
+      organization: {
+        id: "org_1",
+        name: "Acme",
+        slug: "acme",
+      },
+    });
+
+    await expect(
+      service.getSessionDetails({
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 1,
+        iat: 1,
+        exp: 2,
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 });

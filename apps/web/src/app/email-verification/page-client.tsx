@@ -16,6 +16,11 @@ const getErrorMessage = async (response: Response, fallback: string) => {
   return body.message;
 };
 
+type AuthLinkRequestResponse = {
+  ok: boolean;
+  deliveryMode?: "outbox" | "disabled";
+};
+
 export default function EmailVerificationPageClient({
   token,
   initialEmail,
@@ -48,9 +53,19 @@ export default function EmailVerificationPageClient({
         );
       }
 
-      setSuccessMessage(
-        "Bu e-posta ile bir hesap varsa, doğrulama linki gönderildi.",
-      );
+      const body = (await response.json().catch(() => null)) as
+        | AuthLinkRequestResponse
+        | null;
+
+      if (body?.deliveryMode === "disabled") {
+        setSuccessMessage(
+          "Bu ortamda e-posta gönderimi kapalı olduğu için doğrulama linki otomatik gönderilemiyor.",
+        );
+      } else {
+        setSuccessMessage(
+          "Bu e-posta ile bir hesap varsa, doğrulama linki hazırlandı. Outbox preview dosyasını kontrol edebilirsiniz.",
+        );
+      }
     } catch (error) {
       setErrorMessage(
         error instanceof Error
