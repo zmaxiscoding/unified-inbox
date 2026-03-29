@@ -19,7 +19,8 @@
     "prisma:generate": "pnpm check:runtime && pnpm --filter api exec prisma generate",
     "db:migrate": "pnpm check:runtime && pnpm --filter api exec prisma migrate dev",
     "db:seed": "pnpm check:runtime && pnpm --filter api exec prisma db seed",
-    "db:reset": "pnpm check:runtime && pnpm --filter api exec prisma migrate reset --force"
+    "db:reset": "pnpm check:runtime && pnpm --filter api exec prisma migrate reset --force",
+    "smoke:local": "pnpm check:runtime && bash scripts/smoke-local.sh"
   },
   "volta": {
     "node": "20.11.1",

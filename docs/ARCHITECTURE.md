@@ -1,14 +1,14 @@
 # ARCHITECTURE (MVP)
 
-Updated: 2026-03-05 (UTC)
+Updated: 2026-03-29 (UTC)
 
 ## Components
 
 - `apps/web`: Next.js App Router UI
-  - Login, Inbox, Team Settings, Channel Settings, Audit Log
+  - Login, Inbox (with resolve/reopen), Team Settings, Channel Settings
   - `/api/*` requests are proxied to API via Next rewrites
 - `apps/api`: NestJS backend
-  - Auth/session, team ops, conversations, channels, webhooks, audit logs
+  - Auth/session, team ops, conversations (CRUD + status lifecycle), channels, webhooks, audit logs
 - PostgreSQL 16
   - System of record for tenants, users, memberships, channels, conversations/messages, tags/notes, invites, audit logs, raw webhooks
 - Redis 7 + BullMQ
@@ -20,9 +20,17 @@ Updated: 2026-03-05 (UTC)
 - Session payload carries `userId + organizationId (+ role)`
 - API queries are scoped by `organizationId` (no cross-tenant reads/writes)
 - Owner-only endpoints:
-  - Channel connect
+  - Channel connect (WhatsApp + Instagram)
   - Team invite/role/remove operations
   - Audit log viewing
+
+## Conversation Lifecycle
+
+- Statuses: `OPEN` (default on creation) → `RESOLVED` → `OPEN` (reopen)
+- `PATCH /conversations/:id/status` with `{ status: "OPEN" | "RESOLVED" }`
+- Status change creates audit event (`conversation.resolved` / `conversation.reopened`)
+- Same-status transitions are no-op (idempotent)
+- Web UI: optimistic status update with rollback on error
 
 ## Inbound Data Flow (Webhook)
 
@@ -50,6 +58,8 @@ Idempotency:
 6. Message updates to `SENT` / `FAILED`
 7. Provider status webhooks update `DELIVERED` / `READ` / `FAILED`
 
+Note: Instagram outbound adapter is not yet implemented (inbound parity exists).
+
 ## Key DB-Level Guarantees
 
 - Membership uniqueness: `(organizationId, userId)`
@@ -58,8 +68,16 @@ Idempotency:
 - Webhook idempotency: unique `(provider, providerMessageId)` on raw events
 - Invite accept single-use: conditional `updateMany` guard on `acceptedAt/revokedAt/expiresAt`
 
+## Test Infrastructure
+
+- 23 test suites, 178 tests (all in `apps/api`)
+- `apps/web` has typecheck only (no unit/integration tests)
+- CI: `.github/workflows/ci.yml` — lint + test + build on push/PR to main
+- Local smoke: `scripts/smoke-local.sh` — health → login → session → conversations
+
 ## Current Gaps
 
-- Realtime push channel for UI updates is not implemented yet
-- Inbox filter/search/status workflow is incomplete for full operator experience
+- Realtime push channel for UI updates is not implemented (polling only)
 - Instagram outbound adapter not implemented (inbound parity exists)
+- Audit log web UI not implemented (API ready)
+- Channel access tokens stored in plaintext (`TODO(encrypt)`)

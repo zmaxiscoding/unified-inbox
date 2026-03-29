@@ -59,6 +59,11 @@ export default function ChannelsSettingsPage() {
   const [displayPhoneNumber, setDisplayPhoneNumber] = useState("");
   const [wabaId, setWabaId] = useState("");
 
+  const [igAccountId, setIgAccountId] = useState("");
+  const [igAccessToken, setIgAccessToken] = useState("");
+  const [igDisplayName, setIgDisplayName] = useState("");
+  const [isConnectingIg, setIsConnectingIg] = useState(false);
+
   const fetchSession = useCallback(async () => {
     const response = await fetch("/api/auth/session", { cache: "no-store" });
     if (response.status === 401) {
@@ -115,6 +120,54 @@ export default function ChannelsSettingsPage() {
     () => channels.filter((channel) => channel.provider === "WHATSAPP").length,
     [channels],
   );
+
+  const connectedInstagramCount = useMemo(
+    () => channels.filter((channel) => channel.provider === "INSTAGRAM").length,
+    [channels],
+  );
+
+  const handleConnectInstagram = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!igAccountId.trim() || !igAccessToken.trim() || isConnectingIg) {
+      return;
+    }
+
+    setIsConnectingIg(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/channels/instagram/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          instagramAccountId: igAccountId.trim(),
+          accessToken: igAccessToken.trim(),
+          displayName: igDisplayName.trim() || undefined,
+        }),
+      });
+
+      if (response.status === 401) {
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(
+          await getErrorMessage(response, "Instagram kanalı bağlanamadı."),
+        );
+      }
+
+      const created = (await response.json()) as ConnectedChannel;
+      setChannels((current) => [created, ...current]);
+      setIgAccountId("");
+      setIgAccessToken("");
+      setIgDisplayName("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Instagram kanalı bağlanamadı.");
+    } finally {
+      setIsConnectingIg(false);
+    }
+  };
 
   const handleConnectWhatsApp = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -282,6 +335,64 @@ export default function ChannelsSettingsPage() {
           </form>
         </section>
 
+        <section className="mb-8 rounded-lg border border-slate-200 bg-white p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
+              Instagram Connect
+            </h2>
+            <span className="rounded-full bg-fuchsia-100 px-2.5 py-1 text-xs font-medium text-fuchsia-700">
+              Connected: {connectedInstagramCount}
+            </span>
+          </div>
+
+          <form onSubmit={handleConnectInstagram} className="grid gap-3 md:grid-cols-2">
+            <label className="text-sm text-slate-700">
+              Instagram Account ID *
+              <input
+                type="text"
+                value={igAccountId}
+                onChange={(event) => setIgAccountId(event.target.value)}
+                className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
+                placeholder="e.g. 17841400123456789"
+                required
+              />
+            </label>
+
+            <label className="text-sm text-slate-700">
+              Access Token *
+              <input
+                type="password"
+                value={igAccessToken}
+                onChange={(event) => setIgAccessToken(event.target.value)}
+                className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
+                placeholder="EAAG..."
+                required
+              />
+            </label>
+
+            <label className="text-sm text-slate-700">
+              Display Name
+              <input
+                type="text"
+                value={igDisplayName}
+                onChange={(event) => setIgDisplayName(event.target.value)}
+                className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
+                placeholder="@myshop"
+              />
+            </label>
+
+            <div className="flex items-end">
+              <button
+                type="submit"
+                disabled={isConnectingIg}
+                className="h-10 rounded-lg bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+              >
+                {isConnectingIg ? "Bağlanıyor..." : "Connect Instagram"}
+              </button>
+            </div>
+          </form>
+        </section>
+
         <section className="rounded-lg border border-slate-200 bg-white p-5">
           <h2 className="mb-4 text-sm font-semibold uppercase tracking-wide text-slate-700">
             Connected Channels ({channels.length})
@@ -295,8 +406,8 @@ export default function ChannelsSettingsPage() {
                 <thead>
                   <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
                     <th className="px-4 py-3">Provider</th>
-                    <th className="px-4 py-3">Phone Number ID</th>
-                    <th className="px-4 py-3">Display Number</th>
+                    <th className="px-4 py-3">Account ID</th>
+                    <th className="px-4 py-3">Display</th>
                     <th className="px-4 py-3">Connected At</th>
                   </tr>
                 </thead>

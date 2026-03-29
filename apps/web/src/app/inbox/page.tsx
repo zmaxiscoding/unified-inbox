@@ -30,6 +30,7 @@ type Note = {
 
 type Conversation = {
   id: string;
+  status: "OPEN" | "RESOLVED" | string;
   customerDisplay: string;
   lastMessageAt: string | null;
   channelProvider: "WHATSAPP" | "INSTAGRAM" | string;
@@ -69,6 +70,11 @@ type AssignConversationResponse = {
   assignedMembership: AssignedMembership | null;
 };
 
+type UpdateConversationStatusResponse = {
+  id: string;
+  status: "OPEN" | "RESOLVED" | string;
+};
+
 const CHANNEL_LABELS: Record<string, string> = {
   WHATSAPP: "WhatsApp",
   INSTAGRAM: "Instagram",
@@ -76,6 +82,31 @@ const CHANNEL_LABELS: Record<string, string> = {
 
 const UNASSIGNED_VALUE = "__UNASSIGNED__";
 const ENABLE_DEV_ENDPOINTS = process.env.NEXT_PUBLIC_ENABLE_DEV_ENDPOINTS === "true";
+
+function statusLabel(status: string) {
+  if (status === "RESOLVED") return "Resolved";
+  if (status === "OPEN") return "Open";
+  return status;
+}
+
+function statusBadgeClass(status: string, selected: boolean) {
+  const base =
+    "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide";
+
+  if (status === "RESOLVED") {
+    return `${base} ${
+      selected
+        ? "border-emerald-300 bg-emerald-500/20 text-emerald-100"
+        : "border-emerald-200 bg-emerald-50 text-emerald-700"
+    }`;
+  }
+
+  return `${base} ${
+    selected
+      ? "border-sky-300 bg-sky-500/20 text-sky-100"
+      : "border-sky-200 bg-sky-50 text-sky-700"
+  }`;
+}
 
 function formatTimestamp(value: string | null) {
   if (!value) return "-";
@@ -112,6 +143,7 @@ export default function InboxPage() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isLoadingMembers, setIsLoadingMembers] = useState(false);
   const [isAssigning, setIsAssigning] = useState(false);
+  const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [tagInput, setTagInput] = useState("");
   const [isAddingTag, setIsAddingTag] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -121,12 +153,53 @@ export default function InboxPage() {
   const [isSending, setIsSending] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [filterStatus, setFilterStatus] = useState("");
+  const [filterChannel, setFilterChannel] = useState("");
+  const [filterAssignee, setFilterAssignee] = useState("");
+  const [filterTagId, setFilterTagId] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [searchInput, setSearchInput] = useState("");
   const [simulateCustomerDisplay, setSimulateCustomerDisplay] = useState("");
   const [simulateText, setSimulateText] = useState("");
   const [isSimulatingInbound, setIsSimulatingInbound] = useState(false);
   const [simulateInboundMessage, setSimulateInboundMessage] = useState<string | null>(null);
 
   const activeConversationRef = useRef<string | null>(null);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const allTags = useMemo(() => {
+    const tagMap = new Map<string, string>();
+    for (const c of conversations) {
+      for (const t of c.tags) {
+        tagMap.set(t.id, t.name);
+      }
+    }
+    return Array.from(tagMap, ([id, name]) => ({ id, name })).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    );
+  }, [conversations]);
+
+  const handleSearchInputChange = useCallback(
+    (value: string) => {
+      setSearchInput(value);
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+      searchDebounceRef.current = setTimeout(() => {
+        setSearchTerm(value.trim());
+      }, 400);
+    },
+    [],
+  );
+
+  const clearFilters = useCallback(() => {
+    setFilterStatus("");
+    setFilterChannel("");
+    setFilterAssignee("");
+    setFilterTagId("");
+    setSearchInput("");
+    setSearchTerm("");
+  }, []);
+
+  const hasActiveFilters = filterStatus || filterChannel || filterAssignee || filterTagId || searchTerm;
 
   const selectedConversation = useMemo(
     () => conversations.find((conversation) => conversation.id === selectedConversationId) ?? null,
@@ -144,12 +217,30 @@ export default function InboxPage() {
     [],
   );
 
+  const applyConversationStatus = useCallback(
+    (conversationId: string, status: Conversation["status"]) => {
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.id === conversationId ? { ...conversation, status } : conversation,
+        ),
+      );
+    },
+    [],
+  );
+
   const fetchConversations = useCallback(async () => {
     setIsLoadingConversations(true);
     setErrorMessage(null);
 
     try {
-      const response = await fetch("/api/conversations", { cache: "no-store" });
+      const params = new URLSearchParams();
+      if (filterStatus) params.set("status", filterStatus);
+      if (filterChannel) params.set("channel", filterChannel);
+      if (filterAssignee) params.set("assigneeId", filterAssignee);
+      if (filterTagId) params.set("tagId", filterTagId);
+      if (searchTerm) params.set("search", searchTerm);
+      const qs = params.toString();
+      const response = await fetch(`/api/conversations${qs ? `?${qs}` : ""}`, { cache: "no-store" });
       if (response.status === 401) {
         router.replace("/login");
         return;
@@ -175,7 +266,7 @@ export default function InboxPage() {
     } finally {
       setIsLoadingConversations(false);
     }
-  }, [router]);
+  }, [router, filterStatus, filterChannel, filterAssignee, filterTagId, searchTerm]);
 
   const fetchMembers = useCallback(async () => {
     setIsLoadingMembers(true);
@@ -567,6 +658,45 @@ export default function InboxPage() {
     }
   };
 
+  const handleToggleStatus = async () => {
+    if (!selectedConversationId || !selectedConversation || isUpdatingStatus) {
+      return;
+    }
+
+    const previousStatus = selectedConversation.status;
+    const nextStatus: "OPEN" | "RESOLVED" =
+      previousStatus === "RESOLVED" ? "OPEN" : "RESOLVED";
+
+    setIsUpdatingStatus(true);
+    setErrorMessage(null);
+    applyConversationStatus(selectedConversationId, nextStatus);
+
+    try {
+      const response = await fetch(`/api/conversations/${selectedConversationId}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
+
+      if (response.status === 401) {
+        applyConversationStatus(selectedConversationId, previousStatus);
+        router.replace("/login");
+        return;
+      }
+      if (!response.ok) {
+        throw new Error(`Status update failed: ${response.status}`);
+      }
+
+      const data = (await response.json()) as UpdateConversationStatusResponse;
+      applyConversationStatus(data.id, data.status);
+    } catch {
+      applyConversationStatus(selectedConversationId, previousStatus);
+      setErrorMessage("Konuşma durumu güncellenemedi.");
+    } finally {
+      setIsUpdatingStatus(false);
+    }
+  };
+
   return (
     <main className="min-h-screen bg-slate-100 p-4 md:p-6">
       {ENABLE_DEV_ENDPOINTS ? (
@@ -608,7 +738,7 @@ export default function InboxPage() {
         </section>
       ) : null}
       <div className="mx-auto flex h-[calc(100vh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:h-[calc(100vh-3rem)] md:flex-row">
-        <aside className="h-[42%] w-full border-b border-slate-200 md:h-auto md:w-[360px] md:border-r md:border-b-0">
+        <aside className="flex h-[42%] w-full flex-col border-b border-slate-200 md:h-auto md:w-[360px] md:border-r md:border-b-0">
           <div className="border-b border-slate-200 px-5 py-4">
             <h1 className="text-lg font-semibold text-slate-900">Unified Inbox</h1>
             <p className="text-sm text-slate-500">
@@ -616,7 +746,70 @@ export default function InboxPage() {
             </p>
           </div>
 
-          <div className="h-[calc(100%-73px)] overflow-y-auto">
+          <div className="border-b border-slate-200 px-4 py-3 space-y-2">
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => handleSearchInputChange(e.target.value)}
+              placeholder="Ara (müşteri / mesaj)..."
+              className="h-8 w-full rounded-lg border border-slate-200 px-3 text-xs outline-none focus:border-slate-400"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="h-7 rounded border border-slate-200 bg-white px-2 text-xs text-slate-700 outline-none focus:border-slate-400"
+              >
+                <option value="">Tüm Durumlar</option>
+                <option value="OPEN">Open</option>
+                <option value="RESOLVED">Resolved</option>
+              </select>
+              <select
+                value={filterChannel}
+                onChange={(e) => setFilterChannel(e.target.value)}
+                className="h-7 rounded border border-slate-200 bg-white px-2 text-xs text-slate-700 outline-none focus:border-slate-400"
+              >
+                <option value="">Tüm Kanallar</option>
+                <option value="WHATSAPP">WhatsApp</option>
+                <option value="INSTAGRAM">Instagram</option>
+              </select>
+              <select
+                value={filterAssignee}
+                onChange={(e) => setFilterAssignee(e.target.value)}
+                className="h-7 rounded border border-slate-200 bg-white px-2 text-xs text-slate-700 outline-none focus:border-slate-400"
+              >
+                <option value="">Tüm Atamalar</option>
+                {members.map((m) => (
+                  <option key={m.membershipId} value={m.membershipId}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={filterTagId}
+                onChange={(e) => setFilterTagId(e.target.value)}
+                className="h-7 rounded border border-slate-200 bg-white px-2 text-xs text-slate-700 outline-none focus:border-slate-400"
+              >
+                <option value="">Tüm Etiketler</option>
+                {allTags.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {hasActiveFilters ? (
+              <button
+                type="button"
+                onClick={clearFilters}
+                className="text-[11px] font-medium text-slate-500 hover:text-slate-700"
+              >
+                Filtreleri temizle
+              </button>
+            ) : null}
+          </div>
+
+          <div className="min-h-0 flex-1 overflow-y-auto">
             {isLoadingConversations ? (
               <p className="px-5 py-4 text-sm text-slate-500">Yükleniyor...</p>
             ) : conversations.length === 0 ? (
@@ -660,6 +853,11 @@ export default function InboxPage() {
                     >
                       {CHANNEL_LABELS[conversation.channelProvider] ?? conversation.channelProvider}
                     </p>
+                    <div className="mt-2">
+                      <span className={statusBadgeClass(conversation.status, selected)}>
+                        {statusLabel(conversation.status)}
+                      </span>
+                    </div>
                   </button>
                 );
               })
@@ -674,6 +872,13 @@ export default function InboxPage() {
               <h2 className="text-lg font-semibold text-slate-900">
                 {selectedConversation?.customerDisplay ?? "Konuşma seçin"}
               </h2>
+              {selectedConversation ? (
+                <div className="mt-1">
+                  <span className={statusBadgeClass(selectedConversation.status, false)}>
+                    {statusLabel(selectedConversation.status)}
+                  </span>
+                </div>
+              ) : null}
               {session ? (
                 <p className="text-xs text-slate-500">
                   {session.user.name} ({session.user.email})
@@ -681,6 +886,18 @@ export default function InboxPage() {
               ) : null}
             </div>
             <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void handleToggleStatus()}
+                disabled={!selectedConversationId || isUpdatingStatus}
+                className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+              >
+                {isUpdatingStatus
+                  ? "Güncelleniyor..."
+                  : selectedConversation?.status === "RESOLVED"
+                    ? "Reopen"
+                    : "Resolve"}
+              </button>
               <label className="flex items-center gap-2 text-xs text-slate-600">
                 Atama
                 <select

@@ -8,6 +8,8 @@ import { AddTagDto } from "./dto/add-tag.dto";
 import { AssignConversationDto } from "./dto/assign-conversation.dto";
 import { CreateMessageDto } from "./dto/create-message.dto";
 import { CreateNoteDto } from "./dto/create-note.dto";
+import { ListConversationsQueryDto } from "./dto/list-conversations-query.dto";
+import { UpdateConversationStatusDto } from "./dto/update-conversation-status.dto";
 
 const VALID_CUID_MEMBERSHIP_ID = "cjfne4n3f0000qzrmn831i7rn";
 
@@ -19,6 +21,7 @@ describe("ConversationsController", () => {
     listConversationMessages: jest.Mock;
     createOutboundMessage: jest.Mock;
     assignConversation: jest.Mock;
+    updateConversationStatus: jest.Mock;
     listConversationTags: jest.Mock;
     addTagToConversation: jest.Mock;
     removeTagFromConversation: jest.Mock;
@@ -39,6 +42,7 @@ describe("ConversationsController", () => {
       listConversationMessages: jest.fn(),
       createOutboundMessage: jest.fn(),
       assignConversation: jest.fn(),
+      updateConversationStatus: jest.fn(),
       listConversationTags: jest.fn(),
       addTagToConversation: jest.fn(),
       removeTagFromConversation: jest.fn(),
@@ -132,6 +136,30 @@ describe("ConversationsController", () => {
     );
   });
 
+  it("should update conversation status via service", async () => {
+    service.updateConversationStatus.mockResolvedValue({
+      id: "c1",
+      status: "RESOLVED",
+    });
+
+    const result = await controller.updateConversationStatus(
+      "c1",
+      { status: "RESOLVED" },
+      session,
+    );
+
+    expect(result).toEqual({
+      id: "c1",
+      status: "RESOLVED",
+    });
+    expect(service.updateConversationStatus).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      "c1",
+      "RESOLVED",
+    );
+  });
+
   it("should reject assign payload when membershipId is missing", async () => {
     const pipe = new ValidationPipe({
       whitelist: true,
@@ -221,6 +249,57 @@ describe("ConversationsController", () => {
         { membershipId: "not-a-cuid" },
         metadata,
       ),
+    ).rejects.toThrow();
+  });
+
+  it("should accept status payload OPEN", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: UpdateConversationStatusDto,
+      data: "",
+    };
+
+    await expect(pipe.transform({ status: "OPEN" }, metadata)).resolves.toEqual({
+      status: "OPEN",
+    });
+  });
+
+  it("should accept status payload RESOLVED", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: UpdateConversationStatusDto,
+      data: "",
+    };
+
+    await expect(pipe.transform({ status: "RESOLVED" }, metadata)).resolves.toEqual({
+      status: "RESOLVED",
+    });
+  });
+
+  it("should reject status payload outside OPEN and RESOLVED", async () => {
+    const pipe = new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    });
+    const metadata: ArgumentMetadata = {
+      type: "body",
+      metatype: UpdateConversationStatusDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ status: "SNOOZED" }, metadata),
     ).rejects.toThrow();
   });
 
@@ -401,5 +480,78 @@ describe("ConversationsController", () => {
     await expect(
       pipe.transform({ body: "Bu bir not" }, metadata),
     ).resolves.toEqual({ body: "Bu bir not" });
+  });
+
+  // ── List conversations with filters ───────────────────────
+
+  it("should list conversations with filters via service", async () => {
+    service.listConversations.mockResolvedValue([]);
+
+    const query: ListConversationsQueryDto = { status: "OPEN", channel: "WHATSAPP" };
+    const result = await controller.getConversations(session, query);
+
+    expect(result).toEqual([]);
+    expect(service.listConversations).toHaveBeenCalledWith("org_1", query);
+  });
+
+  it("should list conversations without filters", async () => {
+    service.listConversations.mockResolvedValue([]);
+
+    const result = await controller.getConversations(session, {});
+
+    expect(result).toEqual([]);
+    expect(service.listConversations).toHaveBeenCalledWith("org_1", {});
+  });
+
+  // ── Filter DTO validation ─────────────────────────────────
+
+  it("should accept valid filter query params", async () => {
+    const pipe = new ValidationPipe({ whitelist: true, transform: true });
+    const metadata: ArgumentMetadata = {
+      type: "query",
+      metatype: ListConversationsQueryDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ status: "OPEN", channel: "INSTAGRAM", search: "test" }, metadata),
+    ).resolves.toEqual({ status: "OPEN", channel: "INSTAGRAM", search: "test" });
+  });
+
+  it("should reject invalid status filter", async () => {
+    const pipe = new ValidationPipe({ whitelist: true, transform: true });
+    const metadata: ArgumentMetadata = {
+      type: "query",
+      metatype: ListConversationsQueryDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ status: "SNOOZED" }, metadata),
+    ).rejects.toThrow();
+  });
+
+  it("should reject invalid channel filter", async () => {
+    const pipe = new ValidationPipe({ whitelist: true, transform: true });
+    const metadata: ArgumentMetadata = {
+      type: "query",
+      metatype: ListConversationsQueryDto,
+      data: "",
+    };
+
+    await expect(
+      pipe.transform({ channel: "EMAIL" }, metadata),
+    ).rejects.toThrow();
+  });
+
+  it("should accept empty filter query", async () => {
+    const pipe = new ValidationPipe({ whitelist: true, transform: true });
+    const metadata: ArgumentMetadata = {
+      type: "query",
+      metatype: ListConversationsQueryDto,
+      data: "",
+    };
+
+    await expect(pipe.transform({}, metadata)).resolves.toEqual({});
   });
 });

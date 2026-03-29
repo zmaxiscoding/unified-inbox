@@ -1,27 +1,34 @@
 # ROADMAP (M0-M3)
 
-Updated: 2026-03-05 (UTC)
+Updated: 2026-03-29 (UTC)
 
 ## Milestone M0 — Setup & Reproducibility
 
 Goal: New developer can run local demo reliably with minimal commands.
 
-Status: **Partial**
+Status: **Done**
 
 Exit Criteria:
 - `pnpm demo:local` boots install + docker + db + seed + app
 - README and DEVSETUP are aligned with actual commands
 - Node `20.x` + pnpm `9.x` requirement is explicit
 
+Delivered:
+- `pnpm demo:local` one-command bootstrap
+- `.nvmrc` (`20`), `volta` config (`20.11.1` / `9.15.0`), `engine-strict=true`
+- `pnpm smoke:local` wired in `package.json`
+- `scripts/smoke-local.sh` covers health → login → session → conversations
+- CI pipeline (`.github/workflows/ci.yml`) with Postgres + Redis services
+- CI smoke step seeds the DB, boots the built API, and runs `scripts/smoke-local.sh`
+
 Remaining Tasks:
-- [ ] Add CI smoke step for `pnpm setup:local` equivalent
-- [ ] Add quick health/smoke command bundle for local verification
+- None for current MVP gate
 
 ## Milestone M1 — Ingestion Backbone
 
 Goal: Provider events are durable, idempotent, and asynchronously processed.
 
-Status: **Mostly Done**
+Status: **Done**
 
 Delivered:
 - WhatsApp + Instagram webhook verify + signature checks
@@ -45,29 +52,30 @@ Delivered:
 - Assignment dropdown
 - Tags and internal notes
 - Dev inbound simulation widget
+- Conversation status actions (`OPEN ↔ RESOLVED`) from UI with optimistic update + rollback
+- Status badge in conversation list and header
 
 Remaining Tasks:
-- [ ] Channel/status/assignee/tag filters
-- [ ] Search by customer/message content
-- [ ] Conversation status actions (`OPEN/RESOLVED`) from UI
 - [ ] Realtime update mechanism (SSE/WS)
 
 ## Milestone M3 — Team Operations & Governance
 
 Goal: Owner-controlled team ops with auditability.
 
-Status: **Partial to Done**
+Status: **Mostly Done**
 
 Delivered:
 - Invites create/accept/revoke
 - Role update and member removal
 - Last owner invariants with transaction + DB safety
-- Owner-only audit log page with cursor pagination/filter
+- Owner-only audit log API with cursor pagination/filter
+- Conversation resolve/reopen audit events
 
 Remaining Tasks:
+- [ ] Add audit log web UI (API is ready, no web route yet)
 - [ ] Expand audit event coverage for all critical mutations
 - [ ] Strengthen auth from demo mode to production-grade flow
-- [ ] Encrypt provider credentials at rest (`TODO(encrypt)` follow-up)
+- [ ] Encrypt provider credentials at rest (`TODO(encrypt)` — 3 locations in channels service + schema)
 
 ## Release Gate for MVP
 
@@ -77,3 +85,4 @@ MVP is ready for external demo when all are true:
 2. Inbound webhook to inbox path demoable for WhatsApp + Instagram
 3. Team owner flows (invite/role/remove) and audit logs verified
 4. Inbox supports assignment/tags/notes + basic filtering + resolve/reopen
+5. Smoke test script passes in CI
