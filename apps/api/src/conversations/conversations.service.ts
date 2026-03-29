@@ -4,7 +4,13 @@ import {
   InternalServerErrorException,
   NotFoundException,
 } from "@nestjs/common";
-import { MessageDirection, OutboundMessageDeliveryStatus } from "@prisma/client";
+import {
+  ConversationStatus,
+  MessageDirection,
+  OutboundMessageDeliveryStatus,
+  Prisma,
+} from "@prisma/client";
+import { ListConversationsQueryDto } from "./dto/list-conversations-query.dto";
 import { OutboundQueueService } from "../outbound/outbound.queue.service";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -20,6 +26,7 @@ type MessageWithRelations = {
 
 type ConversationListItem = {
   id: string;
+  status: ConversationStatus;
   contactName: string;
   lastMessageAt: Date | null;
   channel: { type: string };
@@ -41,12 +48,44 @@ export class ConversationsService {
     private readonly outboundQueue: OutboundQueueService,
   ) {}
 
-  async listConversations(organizationId: string) {
+  async listConversations(
+    organizationId: string,
+    filters?: ListConversationsQueryDto,
+  ) {
+    const where: Prisma.ConversationWhereInput = { organizationId };
+
+    if (filters?.status) {
+      where.status = filters.status;
+    }
+
+    if (filters?.channel) {
+      where.channel = { type: filters.channel };
+    }
+
+    if (filters?.assigneeId) {
+      where.assignedMembershipId = filters.assigneeId;
+    }
+
+    if (filters?.tagId) {
+      where.tags = { some: { tagId: filters.tagId } };
+    }
+
+    if (filters?.search) {
+      const term = filters.search.trim();
+      if (term) {
+        where.OR = [
+          { contactName: { contains: term, mode: "insensitive" } },
+          { lastMessageText: { contains: term, mode: "insensitive" } },
+        ];
+      }
+    }
+
     const conversations = await this.prisma.conversation.findMany({
-      where: { organizationId },
+      where,
       orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
       select: {
         id: true,
+        status: true,
         contactName: true,
         lastMessageAt: true,
         channel: { select: { type: true } },
@@ -73,6 +112,7 @@ export class ConversationsService {
 
     return conversations.map((conversation: ConversationListItem) => ({
       id: conversation.id,
+      status: conversation.status,
       customerDisplay: conversation.contactName,
       lastMessageAt: conversation.lastMessageAt,
       channelProvider: conversation.channel.type,
@@ -293,6 +333,67 @@ export class ConversationsService {
           }
         : null,
     };
+  }
+
+  async updateConversationStatus(
+    organizationId: string,
+    actorUserId: string,
+    conversationId: string,
+    status: "OPEN" | "RESOLVED",
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      const conversation = await tx.conversation.findFirst({
+        where: {
+          id: conversationId,
+          organizationId,
+        },
+        select: {
+          id: true,
+          status: true,
+        },
+      });
+
+      if (!conversation) {
+        throw new NotFoundException("Conversation not found");
+      }
+
+      if (conversation.status === status) {
+        return {
+          id: conversation.id,
+          status: conversation.status,
+        };
+      }
+
+      const updatedConversation = await tx.conversation.update({
+        where: { id: conversation.id },
+        data: { status },
+        select: {
+          id: true,
+          status: true,
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          action:
+            updatedConversation.status === "RESOLVED"
+              ? "conversation.resolved"
+              : "conversation.reopened",
+          targetId: updatedConversation.id,
+          metadata: {
+            fromStatus: conversation.status,
+            toStatus: updatedConversation.status,
+          },
+          organizationId,
+          actorId: actorUserId,
+        },
+      });
+
+      return {
+        id: updatedConversation.id,
+        status: updatedConversation.status,
+      };
+    });
   }
 
   async listConversationNotes(
