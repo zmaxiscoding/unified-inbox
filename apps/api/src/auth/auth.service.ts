@@ -59,7 +59,7 @@ type AuthLinkRequestResponse = {
 type ResendEmailVerificationResponse = {
   ok: true;
   deliveryMode: AuthEmailTransportMode;
-  deliveryState: "already-verified" | "disabled" | "sent";
+  deliveryState: "accepted" | "already-verified" | "disabled" | "sent";
 };
 
 @Injectable()
@@ -331,10 +331,14 @@ export class AuthService {
     }
 
     try {
-      await this.createAndSendEmailVerificationToken({
+      const deliveryResult = await this.createAndSendEmailVerificationToken({
         id: details.user.id,
         email: details.user.email,
       });
+
+      if (!deliveryResult) {
+        return { ok: true, deliveryMode, deliveryState: "accepted" };
+      }
     } catch (error) {
       if (!(error instanceof AuthEmailDeliveryError)) {
         throw error;

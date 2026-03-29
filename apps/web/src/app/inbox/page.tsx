@@ -64,7 +64,7 @@ type SessionInfo = {
 type ResendVerificationResponse = {
   ok: boolean;
   deliveryMode?: "outbox" | "disabled" | "resend";
-  deliveryState?: "already-verified" | "disabled" | "sent";
+  deliveryState?: "accepted" | "already-verified" | "disabled" | "sent";
 };
 
 type OrganizationMember = {
@@ -348,6 +348,10 @@ export default function InboxPage() {
 
       if (body?.deliveryState === "already-verified") {
         setVerificationMessage("Bu hesap zaten doğrulanmış görünüyor. Sayfayı yenileyebilirsiniz.");
+      } else if (body?.deliveryState === "accepted") {
+        setVerificationMessage(
+          "Doğrulama isteği zaten alındı. Son linki kontrol edin veya biraz sonra tekrar deneyin.",
+        );
       } else if (body?.deliveryState === "disabled" || body?.deliveryMode === "disabled") {
         setVerificationMessage(
           "Bu ortamda e-posta gönderimi kapalı. Doğrulama linki otomatik gönderilemiyor.",

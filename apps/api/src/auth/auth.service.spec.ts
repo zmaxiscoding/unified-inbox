@@ -909,6 +909,43 @@ describe("AuthService", () => {
     expect(emailDelivery.send).not.toHaveBeenCalled();
   });
 
+  it("should report authenticated resend as accepted when a concurrent token already exists", async () => {
+    prisma.membership.findUnique.mockResolvedValue({
+      role: Role.AGENT,
+      user: {
+        id: "u1",
+        email: "agent@acme.com",
+        name: "Agent",
+        emailVerifiedAt: null,
+        sessionVersion: 0,
+      },
+      organization: {
+        id: "org_1",
+        name: "Acme",
+        slug: "acme",
+      },
+    });
+    jest
+      .spyOn(service as never, "createAndSendEmailVerificationToken")
+      .mockResolvedValue(null as never);
+
+    await expect(
+      service.resendEmailVerification({
+        userId: "u1",
+        organizationId: "org_1",
+        sessionVersion: 0,
+        iat: 1,
+        exp: 2,
+      }),
+    ).resolves.toEqual({
+      ok: true,
+      deliveryMode: "outbox",
+      deliveryState: "accepted",
+    });
+
+    expect(emailDelivery.send).not.toHaveBeenCalled();
+  });
+
   it("should fail authenticated resend when delivery fails", async () => {
     prisma.membership.findUnique.mockResolvedValue({
       role: Role.AGENT,
