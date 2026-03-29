@@ -224,6 +224,17 @@ describe("TeamService", () => {
         }),
       }),
     );
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "invite.created",
+          metadata: expect.objectContaining({
+            email: "legacy@acme.com",
+            role: Role.OWNER,
+          }),
+        }),
+      }),
+    );
   });
 
   // ── acceptInvite ────────────────────────────────────────

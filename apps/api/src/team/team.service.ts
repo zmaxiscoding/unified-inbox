@@ -166,10 +166,11 @@ export class TeamService {
           throw new BadRequestException(INVITE_EXISTS_MESSAGE);
         }
 
+        const inviteRole = existingMembership?.role ?? role;
         const createdInvitation = await tx.invitation.create({
           data: {
             email: normalizedEmail,
-            role: existingMembership?.role ?? role,
+            role: inviteRole,
             tokenHash,
             expiresAt,
             organizationId,
@@ -182,7 +183,7 @@ export class TeamService {
           data: {
             action: "invite.created",
             targetId: createdInvitation.id,
-            metadata: { email: normalizedEmail, role },
+            metadata: { email: normalizedEmail, role: inviteRole },
             organizationId,
             actorId: actorUserId,
           },
