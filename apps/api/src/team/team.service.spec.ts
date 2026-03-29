@@ -2,7 +2,9 @@ import {
   BadRequestException,
   ForbiddenException,
   NotFoundException,
+  UnauthorizedException,
 } from "@nestjs/common";
+import * as bcrypt from "bcryptjs";
 import { Role } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { SessionService } from "../auth/session.service";
@@ -32,6 +34,7 @@ describe("TeamService", () => {
     user: {
       findUnique: jest.Mock;
       create: jest.Mock;
+      updateMany: jest.Mock;
     };
     conversation: {
       updateMany: jest.Mock;
@@ -67,6 +70,7 @@ describe("TeamService", () => {
       user: {
         findUnique: jest.fn(),
         create: jest.fn(),
+        updateMany: jest.fn(),
       },
       conversation: {
         updateMany: jest.fn(),
@@ -141,7 +145,10 @@ describe("TeamService", () => {
       role: "OWNER",
       userId: "u1",
     });
-    prisma.membership.findFirst.mockResolvedValue({ id: "mem_existing" });
+    prisma.membership.findFirst.mockResolvedValue({
+      role: "AGENT",
+      user: { passwordHash: "hashed" },
+    });
 
     await expect(
       service.createInvite("org_1", "u1", "existing@acme.com", Role.AGENT),
@@ -191,6 +198,43 @@ describe("TeamService", () => {
     expect(result.inviteId).toBe("inv_1");
     expect(result.inviteLink).toContain("/invite?token=");
     expect(prisma.auditLog.create).toHaveBeenCalled();
+  });
+
+  it("should allow activation invite for an existing member without a password hash", async () => {
+    prisma.membership.findUnique.mockResolvedValue({
+      id: "mem_1",
+      role: "OWNER",
+      userId: "u1",
+    });
+    prisma.membership.findFirst.mockResolvedValue({
+      role: "OWNER",
+      user: { passwordHash: null },
+    });
+    prisma.invitation.findFirst.mockResolvedValue(null);
+    prisma.invitation.create.mockResolvedValue({ id: "inv_legacy" });
+    prisma.auditLog.create.mockResolvedValue({});
+
+    await service.createInvite("org_1", "u1", "legacy@acme.com", Role.AGENT);
+
+    expect(prisma.invitation.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          email: "legacy@acme.com",
+          role: Role.OWNER,
+        }),
+      }),
+    );
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "invite.created",
+          metadata: expect.objectContaining({
+            email: "legacy@acme.com",
+            role: Role.OWNER,
+          }),
+        }),
+      }),
+    );
   });
 
   // ── acceptInvite ────────────────────────────────────────
@@ -303,19 +347,24 @@ describe("TeamService", () => {
 
     const result = await service.acceptInvite(
       "a".repeat(64),
-      "New User",
-      "securePassword123",
+      {
+        name: "New User",
+        password: "securePassword123",
+      },
     );
 
     expect(result.user.email).toBe("new@acme.com");
     expect(result.user.name).toBe("New User");
     expect(prisma.user.create).toHaveBeenCalled();
+    expect(prisma.user.create.mock.calls[0][0].data.passwordHash).not.toBe(
+      "securePassword123",
+    );
     expect(prisma.$transaction).toHaveBeenCalled();
     expect(sessionService.createSessionCookie).toHaveBeenCalled();
     expect(result.sessionCookie).toBe("ui_session=...");
   });
 
-  it("should accept invite for existing user without requiring password", async () => {
+  it("should require password verification before accepting an invite for an existing user", async () => {
     prisma.invitation.findUnique.mockResolvedValue({
       id: "inv_1",
       email: "existing@acme.com",
@@ -330,15 +379,303 @@ describe("TeamService", () => {
       id: "usr_1",
       name: "Existing User",
       email: "existing@acme.com",
+      passwordHash: "hashed-password",
+    });
+
+    await expect(service.acceptInvite("b".repeat(64))).rejects.toMatchObject({
+      response: {
+        code: "INVITE_EXISTING_USER_PASSWORD_REQUIRED",
+        message: "Enter your password to accept this invitation",
+      },
+    });
+  });
+
+  it("should require activation before accepting an invite for a legacy null-password user", async () => {
+    prisma.invitation.findUnique.mockResolvedValue({
+      id: "inv_1",
+      email: "legacy@acme.com",
+      role: "AGENT",
+      expiresAt: new Date("2099-01-01"),
+      acceptedAt: null,
+      revokedAt: null,
+      organizationId: "org_1",
+      organization: { id: "org_1", name: "Acme", slug: "acme" },
+    });
+    prisma.user.findUnique.mockResolvedValue({
+      id: "usr_legacy",
+      name: "Legacy User",
+      email: "legacy@acme.com",
+      passwordHash: null,
+    });
+
+    await expect(service.acceptInvite("e".repeat(64))).rejects.toMatchObject({
+      response: {
+        code: "INVITE_ACCOUNT_ACTIVATION_REQUIRED",
+        message: "Set a password to activate this invited account",
+      },
+    });
+  });
+
+  it("should activate a legacy null-password user while accepting invite", async () => {
+    prisma.invitation.findUnique.mockResolvedValue({
+      id: "inv_1",
+      email: "legacy@acme.com",
+      role: "AGENT",
+      expiresAt: new Date("2099-01-01"),
+      acceptedAt: null,
+      revokedAt: null,
+      organizationId: "org_1",
+      organization: { id: "org_1", name: "Acme", slug: "acme" },
+    });
+    prisma.user.findUnique.mockResolvedValue({
+      id: "usr_legacy",
+      name: "Legacy User",
+      email: "legacy@acme.com",
+      passwordHash: null,
+    });
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
+    prisma.auditLog.create.mockResolvedValue({});
+    sessionService.createSessionCookie.mockReturnValue("ui_session=...");
+
+    const result = await service.acceptInvite("f".repeat(64), {
+      password: "LegacyPass123!",
+    });
+
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "usr_legacy",
+        passwordHash: null,
+      },
+      data: {
+        passwordHash: expect.any(String),
+      },
+    });
+    expect(prisma.user.updateMany.mock.calls[0][0].data.passwordHash).not.toBe(
+      "LegacyPass123!",
+    );
+    expect(result.user.email).toBe("legacy@acme.com");
+    expect(prisma.membership.upsert).toHaveBeenCalled();
+  });
+
+  it("should accept invite for an authenticated user with the same email", async () => {
+    const passwordHash = await bcrypt.hash("ExistingPass123!", 4);
+    prisma.invitation.findUnique.mockResolvedValue({
+      id: "inv_1",
+      email: "existing@acme.com",
+      role: "AGENT",
+      expiresAt: new Date("2099-01-01"),
+      acceptedAt: null,
+      revokedAt: null,
+      organizationId: "org_1",
+      organization: { id: "org_1", name: "Acme", slug: "acme" },
+    });
+    prisma.membership.findUnique.mockResolvedValue({
+      user: {
+        id: "usr_1",
+        name: "Existing User",
+        email: "existing@acme.com",
+        passwordHash,
+      },
     });
     prisma.auditLog.create.mockResolvedValue({});
     sessionService.createSessionCookie.mockReturnValue("ui_session=...");
 
-    const result = await service.acceptInvite("b".repeat(64));
+    const result = await service.acceptInvite("b".repeat(64), {
+      currentSession: {
+        userId: "usr_1",
+        organizationId: "org_current",
+        iat: 1,
+        exp: 2,
+      },
+    });
 
     expect(result.user.email).toBe("existing@acme.com");
     expect(prisma.user.create).not.toHaveBeenCalled();
     expect(prisma.$transaction).toHaveBeenCalled();
+  });
+
+  it("should require password setup for an authenticated legacy user before consuming an activation invite", async () => {
+    prisma.invitation.findUnique.mockResolvedValue({
+      id: "inv_1",
+      email: "legacy@acme.com",
+      role: "AGENT",
+      expiresAt: new Date("2099-01-01"),
+      acceptedAt: null,
+      revokedAt: null,
+      organizationId: "org_1",
+      organization: { id: "org_1", name: "Acme", slug: "acme" },
+    });
+    prisma.membership.findUnique.mockResolvedValue({
+      user: {
+        id: "usr_legacy",
+        name: "Legacy User",
+        email: "legacy@acme.com",
+        passwordHash: null,
+      },
+    });
+
+    await expect(
+      service.acceptInvite("h".repeat(64), {
+        currentSession: {
+          userId: "usr_legacy",
+          organizationId: "org_current",
+          iat: 1,
+          exp: 2,
+        },
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: "INVITE_ACCOUNT_ACTIVATION_REQUIRED",
+        message: "Set a password to activate this invited account",
+      },
+    });
+    expect(prisma.invitation.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("should activate an authenticated legacy user before accepting the invite", async () => {
+    prisma.invitation.findUnique.mockResolvedValue({
+      id: "inv_1",
+      email: "legacy@acme.com",
+      role: "AGENT",
+      expiresAt: new Date("2099-01-01"),
+      acceptedAt: null,
+      revokedAt: null,
+      organizationId: "org_1",
+      organization: { id: "org_1", name: "Acme", slug: "acme" },
+    });
+    prisma.membership.findUnique.mockResolvedValue({
+      user: {
+        id: "usr_legacy",
+        name: "Legacy User",
+        email: "legacy@acme.com",
+        passwordHash: null,
+      },
+    });
+    prisma.user.updateMany.mockResolvedValue({ count: 1 });
+    prisma.auditLog.create.mockResolvedValue({});
+    sessionService.createSessionCookie.mockReturnValue("ui_session=...");
+
+    const result = await service.acceptInvite("i".repeat(64), {
+      currentSession: {
+        userId: "usr_legacy",
+        organizationId: "org_current",
+        iat: 1,
+        exp: 2,
+      },
+      password: "LegacyPass123!",
+    });
+
+    expect(prisma.user.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "usr_legacy",
+        passwordHash: null,
+      },
+      data: {
+        passwordHash: expect.any(String),
+      },
+    });
+    expect(result.user.email).toBe("legacy@acme.com");
+  });
+
+  it("should accept invite for an existing zero-membership user after password verification", async () => {
+    const passwordHash = await bcrypt.hash("ExistingPass123!", 4);
+    prisma.invitation.findUnique.mockResolvedValue({
+      id: "inv_1",
+      email: "existing@acme.com",
+      role: "AGENT",
+      expiresAt: new Date("2099-01-01"),
+      acceptedAt: null,
+      revokedAt: null,
+      organizationId: "org_2",
+      organization: { id: "org_2", name: "Beta", slug: "beta" },
+    });
+    prisma.user.findUnique.mockResolvedValue({
+      id: "usr_1",
+      name: "Existing User",
+      email: "existing@acme.com",
+      passwordHash,
+    });
+    prisma.auditLog.create.mockResolvedValue({});
+    sessionService.createSessionCookie.mockReturnValue("ui_session=beta");
+
+    const result = await service.acceptInvite("g".repeat(64), {
+      password: "ExistingPass123!",
+    });
+
+    expect(result.organization.id).toBe("org_2");
+    expect(result.user.email).toBe("existing@acme.com");
+    expect(prisma.membership.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          organizationId_userId: {
+            organizationId: "org_2",
+            userId: "usr_1",
+          },
+        },
+      }),
+    );
+  });
+
+  it("should reject invite acceptance when the authenticated email does not match", async () => {
+    prisma.invitation.findUnique.mockResolvedValue({
+      id: "inv_1",
+      email: "existing@acme.com",
+      role: "AGENT",
+      expiresAt: new Date("2099-01-01"),
+      acceptedAt: null,
+      revokedAt: null,
+      organizationId: "org_1",
+      organization: { id: "org_1", name: "Acme", slug: "acme" },
+    });
+    prisma.membership.findUnique.mockResolvedValue({
+      user: {
+        id: "usr_2",
+        name: "Other User",
+        email: "other@acme.com",
+        passwordHash: "hashed",
+      },
+    });
+
+    await expect(
+      service.acceptInvite("c".repeat(64), {
+        currentSession: {
+          userId: "usr_2",
+          organizationId: "org_current",
+          iat: 1,
+          exp: 2,
+        },
+      }),
+    ).rejects.toMatchObject({
+      response: {
+        code: "INVITE_EMAIL_MISMATCH",
+        message: "The authenticated user does not match this invitation email",
+      },
+    });
+  });
+
+  it("should reject invite acceptance when the supplied session is no longer valid", async () => {
+    prisma.invitation.findUnique.mockResolvedValue({
+      id: "inv_1",
+      email: "existing@acme.com",
+      role: "AGENT",
+      expiresAt: new Date("2099-01-01"),
+      acceptedAt: null,
+      revokedAt: null,
+      organizationId: "org_1",
+      organization: { id: "org_1", name: "Acme", slug: "acme" },
+    });
+    prisma.membership.findUnique.mockResolvedValue(null);
+
+    await expect(
+      service.acceptInvite("d".repeat(64), {
+        currentSession: {
+          userId: "usr_1",
+          organizationId: "org_current",
+          iat: 1,
+          exp: 2,
+        },
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
   // ── revokeInvite ────────────────────────────────────────

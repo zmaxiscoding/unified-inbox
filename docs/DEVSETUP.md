@@ -59,10 +59,15 @@ pnpm dev
 # Health
 curl http://localhost:3001/health
 
+# Empty DB bootstrap (opsiyonel, seed yerine ilk owner kurmak için)
+curl -i -c cookie.txt -X POST http://localhost:3001/auth/bootstrap \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Ali Yilmaz","email":"owner@acme.com","password":"OwnerPass123!","organizationName":"Acme Store"}'
+
 # Login
 curl -i -c cookie.txt -X POST http://localhost:3001/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"agent@acme.com"}'
+  -d '{"email":"agent@acme.com","password":"AgentPass123!"}'
 
 # Session
 curl -b cookie.txt http://localhost:3001/auth/session
@@ -70,6 +75,16 @@ curl -b cookie.txt http://localhost:3001/auth/session
 # Conversations
 curl -b cookie.txt http://localhost:3001/conversations
 ```
+
+Seed credentials:
+- `agent@acme.com / AgentPass123!`
+- `owner@acme.com / OwnerPass123!`
+
+Invite onboarding notes:
+- Yeni kullanıcı invite kabulünde `name + password` gönderir.
+- Mevcut kullanıcı fresh invite ile doğrudan `password` doğrulayıp katılabilir; aktif membership sayısı `0` olsa da desteklenir.
+- Legacy `passwordHash = null` hesaplar passwordless login ile açılmaz; owner aynı e-posta için fresh invite üretir, kullanıcı invite akışında yeni şifre belirleyerek hesabı aktive eder.
+- Eğer org’daki tüm OWNER hesapları legacy/null-password durumda ve aktif session yoksa, `AUTH_RECOVERY_SECRET` tanımlayıp `POST /auth/recover-owner` ile ilk OWNER hesabını güvenli biçimde aktive edin.
 
 ## Troubleshooting
 

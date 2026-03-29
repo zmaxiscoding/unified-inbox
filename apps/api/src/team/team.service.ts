@@ -1,8 +1,10 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  UnauthorizedException,
 } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
 import * as bcrypt from "bcryptjs";
@@ -11,13 +13,27 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SessionPayload } from "../auth/auth.types";
 import { SessionService } from "../auth/session.service";
 import { SESSION_TTL_SECONDS } from "../auth/session.constants";
+import { PASSWORD_HASH_ROUNDS } from "../auth/password.constants";
 
 const INVITE_EXPIRY_DAYS = 7;
-const BCRYPT_ROUNDS = 12;
 const INVITE_EXISTS_MESSAGE = "A pending invitation already exists for this email";
 const INVITE_NEW_USER_REQUIRED_CODE = "INVITE_NEW_USER_REQUIRED";
 const INVITE_NEW_USER_REQUIRED_MESSAGE =
   "name and password are required for new users";
+const INVITE_LOGIN_REQUIRED_CODE = "INVITE_LOGIN_REQUIRED";
+const INVITE_LOGIN_REQUIRED_MESSAGE =
+  "Log in with the invited email to accept this invitation";
+const INVITE_EXISTING_USER_PASSWORD_REQUIRED_CODE =
+  "INVITE_EXISTING_USER_PASSWORD_REQUIRED";
+const INVITE_EXISTING_USER_PASSWORD_REQUIRED_MESSAGE =
+  "Enter your password to accept this invitation";
+const INVITE_ACCOUNT_ACTIVATION_REQUIRED_CODE =
+  "INVITE_ACCOUNT_ACTIVATION_REQUIRED";
+const INVITE_ACCOUNT_ACTIVATION_REQUIRED_MESSAGE =
+  "Set a password to activate this invited account";
+const INVITE_EMAIL_MISMATCH_CODE = "INVITE_EMAIL_MISMATCH";
+const INVITE_EMAIL_MISMATCH_MESSAGE =
+  "The authenticated user does not match this invitation email";
 
 type TeamDbClient = PrismaService | Prisma.TransactionClient;
 
@@ -122,8 +138,16 @@ export class TeamService {
             organizationId,
             user: { email: normalizedEmail },
           },
+          select: {
+            role: true,
+            user: {
+              select: {
+                passwordHash: true,
+              },
+            },
+          },
         });
-        if (existingMembership) {
+        if (existingMembership?.user.passwordHash) {
           throw new BadRequestException(
             "User is already a member of this organization",
           );
@@ -142,10 +166,11 @@ export class TeamService {
           throw new BadRequestException(INVITE_EXISTS_MESSAGE);
         }
 
+        const inviteRole = existingMembership?.role ?? role;
         const createdInvitation = await tx.invitation.create({
           data: {
             email: normalizedEmail,
-            role,
+            role: inviteRole,
             tokenHash,
             expiresAt,
             organizationId,
@@ -158,7 +183,7 @@ export class TeamService {
           data: {
             action: "invite.created",
             targetId: createdInvitation.id,
-            metadata: { email: normalizedEmail, role },
+            metadata: { email: normalizedEmail, role: inviteRole },
             organizationId,
             actorId: actorUserId,
           },
@@ -182,8 +207,20 @@ export class TeamService {
     };
   }
 
-  async acceptInvite(token: string, name?: string, password?: string) {
+  async acceptInvite(
+    token: string,
+    options?: {
+      currentSession?: SessionPayload;
+      name?: string;
+      password?: string;
+    },
+  ) {
     const tokenHash = createHash("sha256").update(token).digest("hex");
+    const currentSession = options?.currentSession;
+    const name = options?.name?.trim();
+    const password = options?.password;
+    let sessionMatchesInviteUser = false;
+
     const acceptResult = await this.prisma.$transaction(async (tx) => {
       const invitation = await tx.invitation.findUnique({
         where: { tokenHash },
@@ -214,12 +251,64 @@ export class TeamService {
         throw new BadRequestException("Invitation has expired");
       }
 
-      let user = await tx.user.findUnique({
-        where: { email: invitation.email },
-        select: { id: true, name: true, email: true },
-      });
+      let user:
+        | {
+            id: string;
+            name: string;
+            email: string;
+          }
+        | undefined;
+      let existingUser:
+        | {
+            id: string;
+            name: string;
+            email: string;
+            passwordHash: string | null;
+          }
+        | undefined;
 
-      if (!user) {
+      if (currentSession) {
+        const authenticatedMembership = await tx.membership.findUnique({
+          where: {
+            organizationId_userId: {
+              organizationId: currentSession.organizationId,
+              userId: currentSession.userId,
+            },
+          },
+          select: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                passwordHash: true,
+              },
+            },
+          },
+        });
+
+        if (!authenticatedMembership) {
+          throw new UnauthorizedException("Authentication required");
+        }
+
+        if (authenticatedMembership.user.email !== invitation.email) {
+          throw new ForbiddenException({
+            message: INVITE_EMAIL_MISMATCH_MESSAGE,
+            code: INVITE_EMAIL_MISMATCH_CODE,
+          });
+        }
+
+        existingUser = authenticatedMembership.user;
+        sessionMatchesInviteUser = true;
+      } else {
+        existingUser =
+          (await tx.user.findUnique({
+            where: { email: invitation.email },
+            select: { id: true, name: true, email: true, passwordHash: true },
+          })) ?? undefined;
+      }
+
+      if (!user && !existingUser) {
         if (!name || !password) {
           throw new BadRequestException({
             message: INVITE_NEW_USER_REQUIRED_MESSAGE,
@@ -227,12 +316,12 @@ export class TeamService {
           });
         }
 
-        const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+        const passwordHash = await bcrypt.hash(password, PASSWORD_HASH_ROUNDS);
         try {
           user = await tx.user.create({
             data: {
               email: invitation.email,
-              name: name.trim(),
+              name,
               passwordHash,
             },
             select: { id: true, name: true, email: true },
@@ -242,15 +331,98 @@ export class TeamService {
             throw error;
           }
 
-          const concurrentUser = await tx.user.findUnique({
-            where: { email: invitation.email },
-            select: { id: true, name: true, email: true },
-          });
-          if (!concurrentUser) {
-            throw error;
+          existingUser =
+            (await tx.user.findUnique({
+              where: { email: invitation.email },
+              select: { id: true, name: true, email: true, passwordHash: true },
+            })) ?? undefined;
+
+          if (!existingUser) {
+            throw new ConflictException("Account creation could not be completed");
           }
-          user = concurrentUser;
         }
+      }
+
+      if (!user && existingUser) {
+        if (existingUser.passwordHash) {
+          if (!password && !sessionMatchesInviteUser) {
+            throw new BadRequestException({
+              message: INVITE_EXISTING_USER_PASSWORD_REQUIRED_MESSAGE,
+              code: INVITE_EXISTING_USER_PASSWORD_REQUIRED_CODE,
+            });
+          }
+
+          if (!sessionMatchesInviteUser) {
+            const passwordMatches = await bcrypt.compare(
+              password!,
+              existingUser.passwordHash,
+            );
+            if (!passwordMatches) {
+              throw new UnauthorizedException("Invalid credentials");
+            }
+          }
+
+          user = {
+            id: existingUser.id,
+            name: existingUser.name,
+            email: existingUser.email,
+          };
+        } else {
+          if (!password) {
+            throw new BadRequestException({
+              message: INVITE_ACCOUNT_ACTIVATION_REQUIRED_MESSAGE,
+              code: INVITE_ACCOUNT_ACTIVATION_REQUIRED_CODE,
+            });
+          }
+
+          const passwordHash = await bcrypt.hash(password, PASSWORD_HASH_ROUNDS);
+          const activation = await tx.user.updateMany({
+            where: {
+              id: existingUser.id,
+              passwordHash: null,
+            },
+            data: {
+              passwordHash,
+            },
+          });
+
+          if (activation.count !== 1) {
+            const refreshedUser = await tx.user.findUnique({
+              where: { id: existingUser.id },
+              select: { id: true, name: true, email: true, passwordHash: true },
+            });
+            if (!refreshedUser?.passwordHash) {
+              throw new ConflictException("Account activation could not be completed");
+            }
+
+            const passwordMatches = await bcrypt.compare(
+              password,
+              refreshedUser.passwordHash,
+            );
+            if (!passwordMatches) {
+              throw new UnauthorizedException("Invalid credentials");
+            }
+
+            user = {
+              id: refreshedUser.id,
+              name: refreshedUser.name,
+              email: refreshedUser.email,
+            };
+          } else {
+            user = {
+              id: existingUser.id,
+              name: existingUser.name,
+              email: existingUser.email,
+            };
+          }
+        }
+      }
+
+      if (!user) {
+        throw new BadRequestException({
+          message: INVITE_LOGIN_REQUIRED_MESSAGE,
+          code: INVITE_LOGIN_REQUIRED_CODE,
+        });
       }
 
       const acceptedAt = new Date();

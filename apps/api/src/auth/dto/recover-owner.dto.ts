@@ -1,7 +1,11 @@
-import { IsEmail, IsOptional, IsString, MinLength } from "class-validator";
+import { IsEmail, IsString, MinLength } from "class-validator";
 import { PASSWORD_MIN_LENGTH } from "../password.constants";
 
-export class LoginDto {
+export class RecoverOwnerDto {
+  @IsString()
+  @MinLength(1)
+  organizationSlug!: string;
+
   @IsEmail()
   email!: string;
 
@@ -9,8 +13,7 @@ export class LoginDto {
   @MinLength(PASSWORD_MIN_LENGTH)
   password!: string;
 
-  @IsOptional()
   @IsString()
   @MinLength(1)
-  organizationId?: string;
+  recoverySecret!: string;
 }
