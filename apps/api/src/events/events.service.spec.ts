@@ -219,6 +219,70 @@ describe("EventsService", () => {
     jest.useRealTimers();
   });
 
+  it("should ignore stale subscribe failures after a disconnect and reconnect", async () => {
+    jest.useFakeTimers();
+
+    const firstAttempt = createDeferred<void>();
+    const secondAttempt = createDeferred<void>();
+    let subscribeAttempts = 0;
+    let secondFanoutHandler: ((event: SseEvent) => void) | undefined;
+
+    transport.subscribe = jest.fn().mockImplementation(
+      async (_organizationId: string, onEvent: (event: SseEvent) => void) => {
+        subscribeAttempts += 1;
+
+        if (subscribeAttempts === 1) {
+          return firstAttempt.promise;
+        }
+
+        secondFanoutHandler = onEvent;
+        return secondAttempt.promise;
+      },
+    );
+
+    service = new EventsService(transport);
+
+    const firstSubscriber = service.subscribe("org_1").subscribe();
+    firstSubscriber.unsubscribe();
+
+    const received: SseEvent[] = [];
+    const secondSubscriber = service.subscribe("org_1").subscribe({
+      next: (event) => {
+        received.push(event);
+      },
+    });
+
+    secondAttempt.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    firstAttempt.reject(new Error("stale failure"));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    jest.runOnlyPendingTimers();
+    await Promise.resolve();
+
+    expect(transport.subscribe).toHaveBeenCalledTimes(2);
+
+    secondFanoutHandler?.({
+      type: "conversation.updated",
+      conversationId: "conv_reconnect",
+      payload: { action: "statusChanged" },
+    });
+
+    secondSubscriber.unsubscribe();
+    jest.useRealTimers();
+
+    expect(received).toEqual([
+      {
+        type: "conversation.updated",
+        conversationId: "conv_reconnect",
+        payload: { action: "statusChanged" },
+      },
+    ]);
+  });
+
   it("should clean up transport subscription when last subscriber disconnects", () => {
     const orgId = "org_1";
 
@@ -246,3 +310,15 @@ describe("EventsService", () => {
     });
   });
 });
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+
+  return { promise, resolve, reject };
+}

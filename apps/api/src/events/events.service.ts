@@ -20,6 +20,7 @@ export class EventsService implements OnModuleDestroy {
   private readonly logger = new Logger(EventsService.name);
   private readonly subjects = new Map<string, Subject<SseEvent>>();
   private readonly refCounts = new Map<string, number>();
+  private readonly transportGenerations = new Map<string, number>();
   private readonly transportStates = new Map<
     string,
     {
@@ -160,7 +161,6 @@ export class EventsService implements OnModuleDestroy {
       state.retryTimeout = null;
       state.status = "idle";
       state.attempt = 0;
-      state.generation += 1;
       this.transportStates.delete(organizationId);
     }
 
@@ -234,10 +234,16 @@ export class EventsService implements OnModuleDestroy {
         attempt: 0,
         status: "idle",
         retryTimeout: null,
-        generation: 0,
+        generation: this.nextTransportGeneration(organizationId),
       });
     }
 
     return this.transportStates.get(organizationId)!;
+  }
+
+  private nextTransportGeneration(organizationId: string) {
+    const nextGeneration = (this.transportGenerations.get(organizationId) ?? 0) + 1;
+    this.transportGenerations.set(organizationId, nextGeneration);
+    return nextGeneration;
   }
 }
