@@ -67,7 +67,7 @@ export default function PasswordResetPageClient({
         );
       } else {
         setSuccessMessage(
-          "Bu e-posta ile bir hesap varsa, şifre sıfırlama linki hazırlandı. Outbox preview dosyasını kontrol edebilirsiniz.",
+          "Bu e-posta ile bir hesap varsa, istek alındı. Bu ortam outbox kullanıyor; teslim başarılı olduysa preview dosyası oluşur.",
         );
       }
     } catch (error) {

@@ -622,25 +622,26 @@ export class AuthService {
         },
         data: {
           passwordHash,
+          sessionVersion: { increment: 1 },
         },
       });
 
+      const refreshedUser = await tx.user.findUnique({
+        where: { id: targetOwnerMembership.user.id },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          passwordHash: true,
+          sessionVersion: true,
+        },
+      });
+
+      if (!refreshedUser?.passwordHash) {
+        throw new ConflictException("Owner recovery could not be completed");
+      }
+
       if (activation.count !== 1) {
-        const refreshedUser = await tx.user.findUnique({
-          where: { id: targetOwnerMembership.user.id },
-          select: {
-            id: true,
-            email: true,
-            name: true,
-            passwordHash: true,
-            sessionVersion: true,
-          },
-        });
-
-        if (!refreshedUser?.passwordHash) {
-          throw new ConflictException("Owner recovery could not be completed");
-        }
-
         const passwordMatches = await bcrypt.compare(dto.password, refreshedUser.passwordHash);
         if (!passwordMatches) {
           throw new ConflictException("Owner recovery could not be completed");
@@ -669,10 +670,10 @@ export class AuthService {
 
       return {
         user: {
-          id: targetOwnerMembership.user.id,
-          email: targetOwnerMembership.user.email,
-          name: targetOwnerMembership.user.name,
-          sessionVersion: targetOwnerMembership.user.sessionVersion,
+          id: refreshedUser.id,
+          email: refreshedUser.email,
+          name: refreshedUser.name,
+          sessionVersion: refreshedUser.sessionVersion,
         },
         organization: targetOwnerMembership.organization,
       };

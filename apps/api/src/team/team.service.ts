@@ -399,24 +399,25 @@ export class TeamService {
             },
             data: {
               passwordHash,
+              sessionVersion: { increment: 1 },
             },
           });
 
-          if (activation.count !== 1) {
-            const refreshedUser = await tx.user.findUnique({
-              where: { id: existingUser.id },
-              select: {
-                id: true,
-                name: true,
-                email: true,
-                passwordHash: true,
-                sessionVersion: true,
-              },
-            });
-            if (!refreshedUser?.passwordHash) {
-              throw new ConflictException("Account activation could not be completed");
-            }
+          const refreshedUser = await tx.user.findUnique({
+            where: { id: existingUser.id },
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              passwordHash: true,
+              sessionVersion: true,
+            },
+          });
+          if (!refreshedUser?.passwordHash) {
+            throw new ConflictException("Account activation could not be completed");
+          }
 
+          if (activation.count !== 1) {
             const passwordMatches = await bcrypt.compare(
               password,
               refreshedUser.passwordHash,
@@ -433,10 +434,10 @@ export class TeamService {
             };
           } else {
             user = {
-              id: existingUser.id,
-              name: existingUser.name,
-              email: existingUser.email,
-              sessionVersion: existingUser.sessionVersion,
+              id: refreshedUser.id,
+              name: refreshedUser.name,
+              email: refreshedUser.email,
+              sessionVersion: refreshedUser.sessionVersion,
             };
           }
         }

@@ -336,6 +336,13 @@ describe("AuthService", () => {
     });
     prisma.membership.count.mockResolvedValue(0);
     prisma.user.updateMany.mockResolvedValue({ count: 1 });
+    prisma.user.findUnique.mockResolvedValue({
+      id: "u1",
+      email: "owner@acme.com",
+      name: "Owner",
+      passwordHash: "stored-hash",
+      sessionVersion: 1,
+    });
     prisma.auditLog.create.mockResolvedValue({});
 
     const result = await service.recoverOwnerAccess({
@@ -352,11 +359,12 @@ describe("AuthService", () => {
       },
       data: {
         passwordHash: expect.any(String),
+        sessionVersion: { increment: 1 },
       },
     });
     expect(result.organization.slug).toBe("acme");
     expect(result.session.organizationId).toBe("org_1");
-    expect(result.session.sessionVersion).toBe(0);
+    expect(result.session.sessionVersion).toBe(1);
 
     process.env.AUTH_RECOVERY_SECRET = previousSecret;
   });

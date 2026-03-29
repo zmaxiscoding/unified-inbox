@@ -352,7 +352,7 @@ export default function InboxPage() {
         );
       } else {
         setVerificationMessage(
-          "Doğrulama linki hazırlandı. Outbox preview dosyasını kontrol edin.",
+          "Doğrulama isteği alındı. Bu ortam outbox kullanıyor; teslim başarılı olduysa preview dosyası oluşur.",
         );
       }
     } catch {
