@@ -1,6 +1,6 @@
 # STATUS
 
-Updated: 2026-03-29 (UTC)
+Updated: 2026-03-30 (UTC)
 Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 
 ## Current Snapshot
@@ -22,6 +22,7 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 - Smoke script: `scripts/smoke-local.sh` covers health -> password login -> session -> conversations, with optional SSE fanout validation
 - Webhook pipeline: `persist -> queue -> worker` (WhatsApp + Instagram inbound)
 - Conversation resolve/reopen: API + UI + audit logging complete
+- Inbox hardening: resolved conversations now block outbound sends in API + web composer, tag add/remove writes audit logs, and unread state is exposed plus cleared when an agent opens a conversation
 - Audit log web UI route is present in app: `/settings/audit-log`
 - SSE realtime updates: `GET /events/stream` pushes org-scoped events to inbox UI via Redis Pub/Sub fanout when `REDIS_URL` is configured
 - Instagram outbound: send parity with WhatsApp via account-scoped Instagram Graph API adapter
@@ -46,8 +47,8 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 | 1 | Multi-tenant org/workspace isolation | Done | Session scoped by `organizationId`, DB queries tenant-scoped |
 | 2 | Role model (Owner/Agent) + authz | Done | Password login + session auth + owner gates + invite onboarding aligned, including legacy activation / re-invite compat, owner cold-start recovery, password reset, Resend/outbox auth email delivery baseline, and explicit soft/login verification gate |
 | 3 | Team workflows (invites, role update, remove member) | Done | Transaction + lock + last-owner protections |
-| 4 | Assignment / tags / internal notes | Done | API + UI present, audit for assignment exists |
-| 5 | Inbox list + conversation messages + outbound reply | Done | Endpoints + web inbox UI functional |
+| 4 | Assignment / tags / internal notes | Done | API + UI present, assignment + tag audit exists |
+| 5 | Inbox list + conversation messages + outbound reply | Done | Endpoints + web inbox UI functional, unread surfaced and resolved outbound guarded |
 | 6 | Conversation resolve/reopen | Done | API + UI + audit logging + optimistic rollback |
 | 7 | Webhook ingestion (`persist -> queue -> worker`) | Done | WhatsApp + Instagram inbound normalization |
 | 8 | Outbound queue + delivery status tracking | Done | WhatsApp + Instagram send via adapters, status webhook reconciliation |

@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   NotFoundException,
 } from "@nestjs/common";
 import { EventsService } from "../events/events.service";
@@ -16,6 +17,7 @@ describe("ConversationsService", () => {
     conversation: {
       findFirst: jest.Mock;
       update: jest.Mock;
+      updateMany: jest.Mock;
       findMany: jest.Mock;
     };
     message: {
@@ -54,6 +56,7 @@ describe("ConversationsService", () => {
       conversation: {
         findFirst: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
         findMany: jest.fn(),
       },
       message: {
@@ -103,7 +106,10 @@ describe("ConversationsService", () => {
   });
 
   it("should create outbound message as QUEUED and enqueue a send job", async () => {
-    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: "conv_1",
+      status: "OPEN",
+    });
     prisma.message.create.mockResolvedValue({
       id: "msg_1",
       direction: "OUTBOUND",
@@ -166,7 +172,10 @@ describe("ConversationsService", () => {
   });
 
   it("should mark outbound message as FAILED when enqueue fails", async () => {
-    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: "conv_1",
+      status: "OPEN",
+    });
     prisma.message.create.mockResolvedValue({
       id: "msg_2",
       direction: "OUTBOUND",
@@ -191,6 +200,115 @@ describe("ConversationsService", () => {
         providerError: "Outbound queue enqueue failed",
         failedAt: expect.any(Date),
       },
+    });
+  });
+
+  it("should block outbound messages for resolved conversations", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: "conv_1",
+      status: "RESOLVED",
+    });
+
+    await expect(
+      service.createOutboundMessage("org_1", "usr_1", "conv_1", "Merhaba"),
+    ).rejects.toEqual(
+      new ConflictException("Resolved conversations cannot send outbound messages"),
+    );
+
+    expect(prisma.message.create).not.toHaveBeenCalled();
+    expect(outboundQueue.enqueue).not.toHaveBeenCalled();
+    expect(eventsService.emit).not.toHaveBeenCalled();
+  });
+
+  it("should mark unread conversation as read when listing messages", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: "conv_1",
+      isUnread: true,
+      updatedAt: new Date("2026-03-05T10:00:00.000Z"),
+    });
+    prisma.message.findMany.mockResolvedValue([
+      {
+        id: "msg_1",
+        direction: "INBOUND",
+        body: "Merhaba",
+        deliveryStatus: null,
+        createdAt: new Date("2026-03-05T10:00:00.000Z"),
+        sender: null,
+        conversation: { contactName: "Ahmet Kaya" },
+      },
+    ]);
+    prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
+
+    const result = await service.listConversationMessages("org_1", "conv_1");
+
+    expect(result).toEqual([
+      {
+        id: "msg_1",
+        direction: "INBOUND",
+        text: "Merhaba",
+        deliveryStatus: null,
+        createdAt: new Date("2026-03-05T10:00:00.000Z"),
+        senderDisplay: "Ahmet Kaya",
+      },
+    ]);
+    expect(prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "conv_1",
+        organizationId: "org_1",
+        isUnread: true,
+        updatedAt: new Date("2026-03-05T10:00:00.000Z"),
+      },
+      data: { isUnread: false },
+    });
+    expect(eventsService.emit).toHaveBeenCalledWith("org_1", {
+      type: "conversation.updated",
+      conversationId: "conv_1",
+      payload: { action: "markedRead", id: "conv_1", isUnread: false },
+    });
+  });
+
+  it("should not emit read event when conversation is already read", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: "conv_1",
+      isUnread: false,
+      updatedAt: new Date("2026-03-05T10:00:00.000Z"),
+    });
+    prisma.message.findMany.mockResolvedValue([]);
+
+    await service.listConversationMessages("org_1", "conv_1");
+
+    expect(prisma.conversation.updateMany).not.toHaveBeenCalled();
+    expect(eventsService.emit).not.toHaveBeenCalledWith("org_1", {
+      type: "conversation.updated",
+      conversationId: "conv_1",
+      payload: { action: "markedRead", id: "conv_1", isUnread: false },
+    });
+  });
+
+  it("should keep unread state when a newer inbound write wins the race", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: "conv_1",
+      isUnread: true,
+      updatedAt: new Date("2026-03-05T10:00:00.000Z"),
+    });
+    prisma.message.findMany.mockResolvedValue([]);
+    prisma.conversation.updateMany.mockResolvedValue({ count: 0 });
+
+    await service.listConversationMessages("org_1", "conv_1");
+
+    expect(prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "conv_1",
+        organizationId: "org_1",
+        isUnread: true,
+        updatedAt: new Date("2026-03-05T10:00:00.000Z"),
+      },
+      data: { isUnread: false },
+    });
+    expect(eventsService.emit).not.toHaveBeenCalledWith("org_1", {
+      type: "conversation.updated",
+      conversationId: "conv_1",
+      payload: { action: "markedRead", id: "conv_1", isUnread: false },
     });
   });
 
@@ -420,6 +538,7 @@ describe("ConversationsService", () => {
         status: "OPEN",
         contactName: "Ahmet Kaya",
         lastMessageAt: new Date("2026-03-01T10:00:00.000Z"),
+        isUnread: true,
         channel: { type: "WHATSAPP" },
         assignedMembership: {
           id: "mem_1",
@@ -436,6 +555,7 @@ describe("ConversationsService", () => {
         status: "RESOLVED",
         contactName: "Ayşe Çelik",
         lastMessageAt: null,
+        isUnread: false,
         channel: { type: "INSTAGRAM" },
         assignedMembership: null,
         tags: [],
@@ -451,6 +571,8 @@ describe("ConversationsService", () => {
     expect(result[1].assignedMembership).toBeNull();
     expect(result[0].status).toBe("OPEN");
     expect(result[1].status).toBe("RESOLVED");
+    expect(result[0].isUnread).toBe(true);
+    expect(result[1].isUnread).toBe(false);
   });
 
   it("should list organization members for assign dropdown", async () => {
@@ -495,9 +617,15 @@ describe("ConversationsService", () => {
   it("should add tag: create-or-reuse tag + attach to conversation", async () => {
     prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
     prisma.tag.upsert.mockResolvedValue({ id: "t1", name: "vip" });
+    prisma.conversationTag.findUnique.mockResolvedValue(null);
     prisma.conversationTag.upsert.mockResolvedValue({});
 
-    const result = await service.addTagToConversation("org_1", "conv_1", " VIP ");
+    const result = await service.addTagToConversation(
+      "org_1",
+      "actor_1",
+      "conv_1",
+      " VIP ",
+    );
 
     expect(result).toEqual({ id: "t1", name: "vip" });
     expect(prisma.tag.upsert).toHaveBeenCalledWith({
@@ -510,28 +638,66 @@ describe("ConversationsService", () => {
       update: {},
       create: { conversationId: "conv_1", tagId: "t1" },
     });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        action: "conversation.tag_added",
+        targetId: "conv_1",
+        metadata: { tagId: "t1", tagName: "vip" },
+        organizationId: "org_1",
+        actorId: "actor_1",
+      },
+    });
   });
 
   it("should return 404 when adding tag to cross-tenant conversation", async () => {
     prisma.conversation.findFirst.mockResolvedValue(null);
 
     await expect(
-      service.addTagToConversation("org_other", "conv_1", "vip"),
+      service.addTagToConversation("org_other", "actor_1", "conv_1", "vip"),
     ).rejects.toEqual(new NotFoundException("Conversation not found"));
+  });
+
+  it("should not duplicate tag audit logs when tag is already attached", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.tag.upsert.mockResolvedValue({ id: "t1", name: "vip" });
+    prisma.conversationTag.findUnique.mockResolvedValue({
+      conversationId: "conv_1",
+      tagId: "t1",
+    });
+
+    await service.addTagToConversation("org_1", "actor_1", "conv_1", "vip");
+
+    expect(prisma.conversationTag.upsert).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: "conversation.tag_added",
+      }),
+    });
   });
 
   it("should remove tag from conversation", async () => {
     prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
     prisma.conversationTag.findUnique.mockResolvedValue({
-      conversationId: "conv_1",
-      tagId: "t1",
+      tag: {
+        id: "t1",
+        name: "vip",
+      },
     });
     prisma.conversationTag.delete.mockResolvedValue({});
 
-    await service.removeTagFromConversation("org_1", "conv_1", "t1");
+    await service.removeTagFromConversation("org_1", "actor_1", "conv_1", "t1");
 
     expect(prisma.conversationTag.delete).toHaveBeenCalledWith({
       where: { conversationId_tagId: { conversationId: "conv_1", tagId: "t1" } },
+    });
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        action: "conversation.tag_removed",
+        targetId: "conv_1",
+        metadata: { tagId: "t1", tagName: "vip" },
+        organizationId: "org_1",
+        actorId: "actor_1",
+      },
     });
   });
 
@@ -540,7 +706,12 @@ describe("ConversationsService", () => {
     prisma.conversationTag.findUnique.mockResolvedValue(null);
 
     await expect(
-      service.removeTagFromConversation("org_1", "conv_1", "t_nonexistent"),
+      service.removeTagFromConversation(
+        "org_1",
+        "actor_1",
+        "conv_1",
+        "t_nonexistent",
+      ),
     ).rejects.toEqual(
       new NotFoundException("Tag not found on this conversation"),
     );
@@ -553,6 +724,7 @@ describe("ConversationsService", () => {
         status: "OPEN",
         contactName: "Ahmet Kaya",
         lastMessageAt: new Date("2026-03-01T10:00:00.000Z"),
+        isUnread: true,
         channel: { type: "WHATSAPP" },
         assignedMembership: null,
         tags: [
@@ -568,6 +740,7 @@ describe("ConversationsService", () => {
       { id: "t1", name: "vip" },
       { id: "t2", name: "iade" },
     ]);
+    expect(result[0].isUnread).toBe(true);
   });
 
   // ── Note service tests ──────────────────────────────────

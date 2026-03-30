@@ -99,6 +99,7 @@ export class ConversationsController {
   ) {
     return this.conversationsService.addTagToConversation(
       session.organizationId,
+      session.userId,
       id,
       body.name,
     );
@@ -113,6 +114,7 @@ export class ConversationsController {
   ) {
     return this.conversationsService.removeTagFromConversation(
       session.organizationId,
+      session.userId,
       id,
       tagId,
     );

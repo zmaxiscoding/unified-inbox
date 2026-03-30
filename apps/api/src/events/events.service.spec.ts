@@ -283,6 +283,66 @@ describe("EventsService", () => {
     ]);
   });
 
+  it("should not unsubscribe the active transport when a stale subscribe resolves after reconnect", async () => {
+    const firstAttempt = createDeferred<void>();
+    const secondAttempt = createDeferred<void>();
+    let subscribeAttempts = 0;
+    let secondFanoutHandler: ((event: SseEvent) => void) | undefined;
+
+    transport.subscribe = jest.fn().mockImplementation(
+      async (_organizationId: string, onEvent: (event: SseEvent) => void) => {
+        subscribeAttempts += 1;
+
+        if (subscribeAttempts === 1) {
+          return firstAttempt.promise;
+        }
+
+        secondFanoutHandler = onEvent;
+        return secondAttempt.promise;
+      },
+    );
+
+    service = new EventsService(transport);
+
+    const firstSubscriber = service.subscribe("org_1").subscribe();
+    firstSubscriber.unsubscribe();
+
+    const received: SseEvent[] = [];
+    const secondSubscriber = service.subscribe("org_1").subscribe({
+      next: (event) => {
+        received.push(event);
+      },
+    });
+
+    secondAttempt.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(transport.unsubscribe).toHaveBeenCalledTimes(1);
+
+    firstAttempt.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(transport.unsubscribe).toHaveBeenCalledTimes(1);
+
+    secondFanoutHandler?.({
+      type: "message.created",
+      conversationId: "conv_reconnect",
+      payload: { text: "still connected" },
+    });
+
+    secondSubscriber.unsubscribe();
+
+    expect(received).toEqual([
+      {
+        type: "message.created",
+        conversationId: "conv_reconnect",
+        payload: { text: "still connected" },
+      },
+    ]);
+    expect(transport.unsubscribe).toHaveBeenCalledTimes(2);
+  });
   it("should clean up transport subscription when last subscriber disconnects", () => {
     const orgId = "org_1";
 

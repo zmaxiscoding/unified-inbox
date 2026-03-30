@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   InternalServerErrorException,
   NotFoundException,
@@ -30,6 +31,7 @@ type ConversationListItem = {
   status: ConversationStatus;
   contactName: string;
   lastMessageAt: Date | null;
+  isUnread: boolean;
   channel: { type: string };
   assignedMembership: {
     id: string;
@@ -90,6 +92,7 @@ export class ConversationsService {
         status: true,
         contactName: true,
         lastMessageAt: true,
+        isUnread: true,
         channel: { select: { type: true } },
         assignedMembership: {
           select: {
@@ -117,6 +120,7 @@ export class ConversationsService {
       status: conversation.status,
       customerDisplay: conversation.contactName,
       lastMessageAt: conversation.lastMessageAt,
+      isUnread: conversation.isUnread,
       channelProvider: conversation.channel.type,
       assignedMembership: conversation.assignedMembership
         ? {
@@ -154,23 +158,62 @@ export class ConversationsService {
   }
 
   async listConversationMessages(organizationId: string, conversationId: string) {
-    const conversation = await this.getConversationInOrganization(
-      organizationId,
-      conversationId,
-    );
-    const messages = await this.prisma.message.findMany({
-      where: { conversationId: conversation.id },
-      orderBy: { createdAt: "asc" },
-      select: {
-        id: true,
-        direction: true,
-        body: true,
-        deliveryStatus: true,
-        createdAt: true,
-        sender: { select: { name: true } },
-        conversation: { select: { contactName: true } },
+    const { conversation, messages, markedAsRead } = await this.prisma.$transaction(
+      async (tx) => {
+        const conversation = await tx.conversation.findFirst({
+          where: { id: conversationId, organizationId },
+          select: {
+            id: true,
+            isUnread: true,
+            updatedAt: true,
+          },
+        });
+
+        if (!conversation) {
+          throw new NotFoundException("Conversation not found");
+        }
+
+        const messages = await tx.message.findMany({
+          where: { conversationId: conversation.id },
+          orderBy: { createdAt: "asc" },
+          select: {
+            id: true,
+            direction: true,
+            body: true,
+            deliveryStatus: true,
+            createdAt: true,
+            sender: { select: { name: true } },
+            conversation: { select: { contactName: true } },
+          },
+        });
+
+        const readResetResult = conversation.isUnread
+          ? await tx.conversation.updateMany({
+              where: {
+                id: conversation.id,
+                organizationId,
+                isUnread: true,
+                updatedAt: conversation.updatedAt,
+              },
+              data: { isUnread: false },
+            })
+          : { count: 0 };
+
+        return {
+          conversation,
+          messages,
+          markedAsRead: readResetResult.count > 0,
+        };
       },
-    });
+    );
+
+    if (markedAsRead) {
+      this.eventsService.emit(organizationId, {
+        type: "conversation.updated",
+        conversationId,
+        payload: { action: "markedRead", id: conversation.id, isUnread: false },
+      });
+    }
 
     return messages.map((message: MessageWithRelations) =>
       this.toMessageResponse(message),
@@ -191,11 +234,20 @@ export class ConversationsService {
           id: conversationId,
           organizationId,
         },
-        select: { id: true },
+        select: {
+          id: true,
+          status: true,
+        },
       });
 
       if (!conversation) {
         throw new NotFoundException("Conversation not found");
+      }
+
+      if (conversation.status === ConversationStatus.RESOLVED) {
+        throw new ConflictException(
+          "Resolved conversations cannot send outbound messages",
+        );
       }
 
       const createdMessage = await tx.message.create({
@@ -518,33 +570,66 @@ export class ConversationsService {
 
   async addTagToConversation(
     organizationId: string,
+    actorUserId: string,
     conversationId: string,
     rawName: string,
   ) {
-    const conversation = await this.getConversationInOrganization(
-      organizationId,
-      conversationId,
-    );
-
     const name = rawName.trim().toLowerCase();
 
-    const tag = await this.prisma.tag.upsert({
-      where: {
-        organizationId_name: { organizationId, name },
-      },
-      update: {},
-      create: { name, organizationId },
-    });
+    const { tag } = await this.prisma.$transaction(async (tx) => {
+      const conversation = await tx.conversation.findFirst({
+        where: { id: conversationId, organizationId },
+        select: { id: true },
+      });
 
-    await this.prisma.conversationTag.upsert({
-      where: {
-        conversationId_tagId: {
-          conversationId: conversation.id,
-          tagId: tag.id,
+      if (!conversation) {
+        throw new NotFoundException("Conversation not found");
+      }
+
+      const tag = await tx.tag.upsert({
+        where: {
+          organizationId_name: { organizationId, name },
         },
-      },
-      update: {},
-      create: { conversationId: conversation.id, tagId: tag.id },
+        update: {},
+        create: { name, organizationId },
+      });
+
+      const existingLink = await tx.conversationTag.findUnique({
+        where: {
+          conversationId_tagId: {
+            conversationId: conversation.id,
+            tagId: tag.id,
+          },
+        },
+      });
+
+      if (!existingLink) {
+        await tx.conversationTag.upsert({
+          where: {
+            conversationId_tagId: {
+              conversationId: conversation.id,
+              tagId: tag.id,
+            },
+          },
+          update: {},
+          create: { conversationId: conversation.id, tagId: tag.id },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            action: "conversation.tag_added",
+            targetId: conversation.id,
+            metadata: {
+              tagId: tag.id,
+              tagName: tag.name,
+            },
+            organizationId,
+            actorId: actorUserId,
+          },
+        });
+      }
+
+      return { tag };
     });
 
     this.eventsService.emit(organizationId, {
@@ -557,34 +642,62 @@ export class ConversationsService {
 
   async removeTagFromConversation(
     organizationId: string,
+    actorUserId: string,
     conversationId: string,
     tagId: string,
   ) {
-    const conversation = await this.getConversationInOrganization(
-      organizationId,
-      conversationId,
-    );
+    await this.prisma.$transaction(async (tx) => {
+      const conversation = await tx.conversation.findFirst({
+        where: { id: conversationId, organizationId },
+        select: { id: true },
+      });
 
-    const link = await this.prisma.conversationTag.findUnique({
-      where: {
-        conversationId_tagId: {
-          conversationId: conversation.id,
-          tagId,
+      if (!conversation) {
+        throw new NotFoundException("Conversation not found");
+      }
+
+      const link = await tx.conversationTag.findUnique({
+        where: {
+          conversationId_tagId: {
+            conversationId: conversation.id,
+            tagId,
+          },
         },
-      },
-    });
-
-    if (!link) {
-      throw new NotFoundException("Tag not found on this conversation");
-    }
-
-    await this.prisma.conversationTag.delete({
-      where: {
-        conversationId_tagId: {
-          conversationId: conversation.id,
-          tagId,
+        select: {
+          tag: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
         },
-      },
+      });
+
+      if (!link) {
+        throw new NotFoundException("Tag not found on this conversation");
+      }
+
+      await tx.conversationTag.delete({
+        where: {
+          conversationId_tagId: {
+            conversationId: conversation.id,
+            tagId,
+          },
+        },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          action: "conversation.tag_removed",
+          targetId: conversation.id,
+          metadata: {
+            tagId: link.tag.id,
+            tagName: link.tag.name,
+          },
+          organizationId,
+          actorId: actorUserId,
+        },
+      });
     });
 
     this.eventsService.emit(organizationId, {

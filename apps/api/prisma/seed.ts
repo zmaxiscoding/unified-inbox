@@ -179,9 +179,9 @@ async function main() {
         actorId: owner.id,
       },
       {
-        action: "tag.added",
+        action: "conversation.tag_added",
         targetId: conv1.id,
-        metadata: { tag: "VIP" },
+        metadata: { tagId: vipTag.id, tagName: "VIP" },
         organizationId: org.id,
         actorId: agent.id,
       },
