@@ -125,12 +125,16 @@ export class EventsService implements OnModuleDestroy {
       })
       .then(() => {
         const currentState = this.transportStates.get(organizationId);
-        if (!currentState || currentState.generation !== generation) {
+        if (!currentState) {
           void this.transport.unsubscribe(organizationId).catch((error) => {
             this.logger.warn(
               `Failed to clean up stale realtime fanout for org ${organizationId}: ${this.toErrorMessage(error)}`,
             );
           });
+          return;
+        }
+
+        if (currentState.generation !== generation) {
           return;
         }
 

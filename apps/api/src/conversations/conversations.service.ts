@@ -165,6 +165,7 @@ export class ConversationsService {
           select: {
             id: true,
             isUnread: true,
+            updatedAt: true,
           },
         });
 
@@ -186,17 +187,22 @@ export class ConversationsService {
           },
         });
 
-        if (conversation.isUnread) {
-          await tx.conversation.update({
-            where: { id: conversation.id },
-            data: { isUnread: false },
-          });
-        }
+        const readResetResult = conversation.isUnread
+          ? await tx.conversation.updateMany({
+              where: {
+                id: conversation.id,
+                organizationId,
+                isUnread: true,
+                updatedAt: conversation.updatedAt,
+              },
+              data: { isUnread: false },
+            })
+          : { count: 0 };
 
         return {
           conversation,
           messages,
-          markedAsRead: conversation.isUnread,
+          markedAsRead: readResetResult.count > 0,
         };
       },
     );

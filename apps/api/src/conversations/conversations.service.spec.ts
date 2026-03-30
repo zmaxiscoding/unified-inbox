@@ -17,6 +17,7 @@ describe("ConversationsService", () => {
     conversation: {
       findFirst: jest.Mock;
       update: jest.Mock;
+      updateMany: jest.Mock;
       findMany: jest.Mock;
     };
     message: {
@@ -55,6 +56,7 @@ describe("ConversationsService", () => {
       conversation: {
         findFirst: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
         findMany: jest.fn(),
       },
       message: {
@@ -222,6 +224,7 @@ describe("ConversationsService", () => {
     prisma.conversation.findFirst.mockResolvedValue({
       id: "conv_1",
       isUnread: true,
+      updatedAt: new Date("2026-03-05T10:00:00.000Z"),
     });
     prisma.message.findMany.mockResolvedValue([
       {
@@ -234,7 +237,7 @@ describe("ConversationsService", () => {
         conversation: { contactName: "Ahmet Kaya" },
       },
     ]);
-    prisma.conversation.update.mockResolvedValue({});
+    prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await service.listConversationMessages("org_1", "conv_1");
 
@@ -248,8 +251,13 @@ describe("ConversationsService", () => {
         senderDisplay: "Ahmet Kaya",
       },
     ]);
-    expect(prisma.conversation.update).toHaveBeenCalledWith({
-      where: { id: "conv_1" },
+    expect(prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "conv_1",
+        organizationId: "org_1",
+        isUnread: true,
+        updatedAt: new Date("2026-03-05T10:00:00.000Z"),
+      },
       data: { isUnread: false },
     });
     expect(eventsService.emit).toHaveBeenCalledWith("org_1", {
@@ -263,13 +271,38 @@ describe("ConversationsService", () => {
     prisma.conversation.findFirst.mockResolvedValue({
       id: "conv_1",
       isUnread: false,
+      updatedAt: new Date("2026-03-05T10:00:00.000Z"),
     });
     prisma.message.findMany.mockResolvedValue([]);
 
     await service.listConversationMessages("org_1", "conv_1");
 
-    expect(prisma.conversation.update).not.toHaveBeenCalledWith({
-      where: { id: "conv_1" },
+    expect(prisma.conversation.updateMany).not.toHaveBeenCalled();
+    expect(eventsService.emit).not.toHaveBeenCalledWith("org_1", {
+      type: "conversation.updated",
+      conversationId: "conv_1",
+      payload: { action: "markedRead", id: "conv_1", isUnread: false },
+    });
+  });
+
+  it("should keep unread state when a newer inbound write wins the race", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: "conv_1",
+      isUnread: true,
+      updatedAt: new Date("2026-03-05T10:00:00.000Z"),
+    });
+    prisma.message.findMany.mockResolvedValue([]);
+    prisma.conversation.updateMany.mockResolvedValue({ count: 0 });
+
+    await service.listConversationMessages("org_1", "conv_1");
+
+    expect(prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "conv_1",
+        organizationId: "org_1",
+        isUnread: true,
+        updatedAt: new Date("2026-03-05T10:00:00.000Z"),
+      },
       data: { isUnread: false },
     });
     expect(eventsService.emit).not.toHaveBeenCalledWith("org_1", {
