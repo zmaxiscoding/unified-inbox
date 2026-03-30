@@ -137,7 +137,6 @@ export class EventsService implements OnModuleDestroy {
         if (currentState.generation !== generation) {
           return;
         }
-
         currentState.status = "subscribed";
         currentState.attempt = 0;
       })

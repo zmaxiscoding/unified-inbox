@@ -343,7 +343,6 @@ describe("EventsService", () => {
     ]);
     expect(transport.unsubscribe).toHaveBeenCalledTimes(2);
   });
-
   it("should clean up transport subscription when last subscriber disconnects", () => {
     const orgId = "org_1";
 
