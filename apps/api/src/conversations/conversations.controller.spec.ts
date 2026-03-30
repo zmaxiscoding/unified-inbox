@@ -321,7 +321,12 @@ describe("ConversationsController", () => {
     const result = await controller.addTag("c1", { name: "VIP" }, session);
 
     expect(result).toEqual({ id: "t1", name: "vip" });
-    expect(service.addTagToConversation).toHaveBeenCalledWith("org_1", "c1", "VIP");
+    expect(service.addTagToConversation).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      "c1",
+      "VIP",
+    );
   });
 
   it("should remove tag via service", async () => {
@@ -329,7 +334,12 @@ describe("ConversationsController", () => {
 
     await controller.removeTag("c1", "t1", session);
 
-    expect(service.removeTagFromConversation).toHaveBeenCalledWith("org_1", "c1", "t1");
+    expect(service.removeTagFromConversation).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      "c1",
+      "t1",
+    );
   });
 
   it("should reject blank tag name", async () => {

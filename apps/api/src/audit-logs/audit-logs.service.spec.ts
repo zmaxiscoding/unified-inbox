@@ -163,7 +163,7 @@ describe("AuditLogsService", () => {
       },
       {
         id: "log_3",
-        action: "tag.added",
+        action: "conversation.tag_added",
         targetId: "conv_1",
         metadata: null,
         createdAt: new Date("2026-03-03T11:00:00.000Z"),

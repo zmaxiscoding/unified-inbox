@@ -33,6 +33,7 @@ type Conversation = {
   status: "OPEN" | "RESOLVED" | string;
   customerDisplay: string;
   lastMessageAt: string | null;
+  isUnread: boolean;
   channelProvider: "WHATSAPP" | "INSTAGRAM" | string;
   assignedMembership: AssignedMembership | null;
   tags: Tag[];
@@ -239,6 +240,16 @@ export default function InboxPage() {
     [],
   );
 
+  const applyConversationRead = useCallback((conversationId: string) => {
+    setConversations((current) =>
+      current.map((conversation) =>
+        conversation.id === conversationId
+          ? { ...conversation, isUnread: false }
+          : conversation,
+      ),
+    );
+  }, []);
+
   const fetchConversations = useCallback(async () => {
     setIsLoadingConversations(true);
     setErrorMessage(null);
@@ -390,6 +401,7 @@ export default function InboxPage() {
       const data = (await response.json()) as Message[];
       if (activeConversationRef.current !== conversationId) return;
       setMessages(data);
+      applyConversationRead(conversationId);
     } catch {
       if (activeConversationRef.current === conversationId) {
         setErrorMessage("Mesajlar alınırken hata oluştu.");
@@ -399,7 +411,7 @@ export default function InboxPage() {
         setIsLoadingMessages(false);
       }
     }
-  }, [router]);
+  }, [applyConversationRead, router]);
 
   const fetchNotes = useCallback(async (conversationId: string) => {
     setIsLoadingNotes(true);
@@ -548,7 +560,9 @@ export default function InboxPage() {
   const handleSend = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!selectedConversationId || !draft.trim()) return;
+    if (!selectedConversationId || !draft.trim() || selectedConversation?.status === "RESOLVED") {
+      return;
+    }
 
     setIsSending(true);
     setErrorMessage(null);
@@ -562,6 +576,10 @@ export default function InboxPage() {
 
       if (response.status === 401) {
         router.replace("/login");
+        return;
+      }
+      if (response.status === 409) {
+        setErrorMessage("Bu konuşma resolved durumda. Mesaj göndermek için önce yeniden açın.");
         return;
       }
       if (!response.ok) {
@@ -838,6 +856,10 @@ export default function InboxPage() {
     }
   };
 
+  const isResolvedConversation = selectedConversation?.status === "RESOLVED";
+  const isComposerDisabled =
+    !selectedConversationId || isSending || isResolvedConversation;
+
   return (
     <main className="min-h-screen bg-slate-100 p-4 md:p-6">
       {session && !session.user.emailVerifiedAt ? (
@@ -1003,17 +1025,38 @@ export default function InboxPage() {
             ) : (
               conversations.map((conversation) => {
                 const selected = conversation.id === selectedConversationId;
+                const unread = conversation.isUnread;
                 return (
                   <button
                     key={conversation.id}
                     type="button"
                     onClick={() => setSelectedConversationId(conversation.id)}
                     className={`w-full border-b border-slate-100 px-5 py-4 text-left transition ${
-                      selected ? "bg-slate-900 text-white" : "hover:bg-slate-50"
+                      selected
+                        ? "bg-slate-900 text-white"
+                        : unread
+                          ? "bg-sky-50 hover:bg-sky-100/70"
+                          : "hover:bg-slate-50"
                     }`}
                   >
                     <div className="flex items-center justify-between gap-3">
-                      <p className="truncate text-sm font-medium">{conversation.customerDisplay}</p>
+                      <div className="flex min-w-0 items-center gap-2">
+                        {unread ? (
+                          <span
+                            aria-hidden="true"
+                            className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                              selected ? "bg-sky-300" : "bg-sky-500"
+                            }`}
+                          />
+                        ) : null}
+                        <p
+                          className={`truncate text-sm ${
+                            unread ? "font-semibold" : "font-medium"
+                          }`}
+                        >
+                          {conversation.customerDisplay}
+                        </p>
+                      </div>
                       <div className="flex shrink-0 items-center gap-2">
                         {conversation.assignedMembership ? (
                           <span
@@ -1034,12 +1077,27 @@ export default function InboxPage() {
                     </div>
                     <p
                       className={`mt-1 text-xs ${
-                        selected ? "text-slate-300" : "text-slate-500"
+                        selected
+                          ? "text-slate-300"
+                          : unread
+                            ? "text-sky-700"
+                            : "text-slate-500"
                       }`}
                     >
                       {CHANNEL_LABELS[conversation.channelProvider] ?? conversation.channelProvider}
                     </p>
-                    <div className="mt-2">
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {unread ? (
+                        <span
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                            selected
+                              ? "bg-sky-500/20 text-sky-100"
+                              : "bg-sky-100 text-sky-700"
+                          }`}
+                        >
+                          Okunmadı
+                        </span>
+                      ) : null}
                       <span className={statusBadgeClass(conversation.status, selected)}>
                         {statusLabel(conversation.status)}
                       </span>
@@ -1244,18 +1302,27 @@ export default function InboxPage() {
           </div>
 
           <form onSubmit={handleSend} className="border-t border-slate-200 px-6 py-4">
+            {isResolvedConversation ? (
+              <p className="mb-3 text-xs font-medium text-amber-700">
+                Bu konuşma resolved durumda. Mesaj göndermek için önce yeniden açın.
+              </p>
+            ) : null}
             <div className="flex items-center gap-3">
               <input
                 type="text"
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
-                placeholder="Mesaj yaz..."
+                placeholder={
+                  isResolvedConversation
+                    ? "Resolved konuşma yeniden açılmadan mesaj gönderilemez"
+                    : "Mesaj yaz..."
+                }
                 className="h-11 flex-1 rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
-                disabled={!selectedConversationId || isSending}
+                disabled={isComposerDisabled}
               />
               <button
                 type="submit"
-                disabled={!selectedConversationId || !draft.trim() || isSending}
+                disabled={isComposerDisabled || !draft.trim()}
                 className="h-11 rounded-lg bg-slate-900 px-5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
                 {isSending ? "Gönderiliyor..." : "Gönder"}
