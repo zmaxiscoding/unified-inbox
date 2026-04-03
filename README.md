@@ -2,6 +2,8 @@
 
 WhatsApp + Instagram mesajlarını tek ekrandan yöneten e-ticaret SaaS uygulaması.
 
+Bu repository local demo ve MVP kullanımına hazırdır; production deployment için live provider credentials, queue/monitoring operability ve release runbook gerekir.
+
 ## Gereksinimler
 
 - [Node.js](https://nodejs.org/) 20.x
@@ -54,6 +56,15 @@ pnpm db:reset         # DB'yi sıfırlar ve migration'ları yeniden uygular
 pnpm smoke:local      # API health + login + session + conversations (+ optional realtime) smoke testi
 ```
 
+Web Playwright smoke için ilk kurulumda tarayıcıyı bir kez indir:
+
+```bash
+pnpm --filter web exec playwright install --with-deps chromium
+pnpm --filter web test:e2e
+```
+
+`pnpm --filter web test` komutu typecheck + Playwright smoke'u birlikte çalıştırır; `playwright.config.mjs` gerekli `next dev` sunucusunu otomatik açar.
+
 ## Auth Recovery Baseline
 
 - `POST /auth/password-reset/request|confirm`, `POST /auth/email-verification/request|confirm` ve authenticated `POST /auth/email-verification/resend` endpoint'leri eklidir.
@@ -80,11 +91,21 @@ AUTH_EMAIL_FROM="Unified Inbox <no-reply@example.test>"
 AUTH_EMAIL_OUTBOX_DIR=.auth-email-outbox
 AUTH_EMAIL_VERIFICATION_MODE=soft   # soft | login
 RESEND_API_KEY=
+WHATSAPP_GRAPH_API_VERSION=v21.0
+INSTAGRAM_GRAPH_API_VERSION=v21.0
 ```
 
 Notes:
 - `outbox` development için en düşük riskli default'tur; preview dosyaları çalışma dizinine göre çoğunlukla `apps/api/.auth-email-outbox/` altında oluşur.
 - Public password reset / verification request sayfaları teslim sonucunu özellikle generic gösterir; inbox banner'daki authenticated resend ise gerçek outcome'u daha net yansıtır.
+- `AUTH_EMAIL_TRANSPORT=disabled` development için güvenli no-op davranıştır; production'da verification/recovery akışları için `outbox` veya `resend` gerekir.
+- `WHATSAPP_GRAPH_API_VERSION` ve `INSTAGRAM_GRAPH_API_VERSION` opsiyoneldir; unset kalırsa adapter'lar `v21.0` varsayar.
+
+## Release Notes
+
+- `demo-ready`: `pnpm demo:local`, `pnpm smoke:local`, `pnpm lint`, `pnpm test`, `pnpm build`
+- `production-ready`: canlı provider credentials, `SESSION_SECRET`, `CHANNEL_TOKEN_SECRET`, `AUTH_RECOVERY_SECRET`, `RESEND_API_KEY`, Redis, migrate deploy ve operasyon runbook'u tamamlanmış kurulum
+- Bu repo şu an `demo-ready` seviyesindedir; production checklist tamamlanmadan canlı ortama çıkış önerilmez.
 
 ## API Örnekleri
 

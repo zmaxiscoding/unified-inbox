@@ -8,6 +8,7 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 - Git publish state intentionally omitted here; use `git status -sb` / `git log -1 --oneline` for live branch + commit info
 - Runtime: Node `20.x` enforced via `.nvmrc` + `package.json#volta`; use `nvm use 20` if your shell default differs
 - Monorepo shape: `apps/api` (NestJS + Prisma), `apps/web` (Next.js), `docker-compose.yml` (Postgres + Redis)
+- Current codebase is `demo-ready`; production deployment still needs runbook, live provider credentials, monitoring and secret hygiene review.
 
 ## What Works (Command-Verified on 2026-03-29)
 
@@ -30,6 +31,7 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 - Auth: bcrypt-backed email/password login, one-time owner bootstrap, secure invite onboarding, legacy null-password activation via fresh invite, cold-start owner recovery via `AUTH_RECOVERY_SECRET`, password reset request/confirm, email verification request/resend/confirm, explicit `soft|login` verification gate, logout + session validation
 - Auth email delivery: provider-agnostic `disabled|outbox|resend` transport with development outbox preview files and Resend production baseline
 - Realtime fallback: when `REDIS_URL` is absent in non-production, SSE safely falls back to same-process delivery only
+- Docs and local demo flows are aligned with the current codebase for local development and smoke testing
 
 ## What Is Broken or Missing
 
@@ -38,7 +40,9 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 2. Account recovery follow-up:
    - MFA is not implemented yet.
 3. Operational visibility:
-   - Explicit dead-letter visibility and queue metrics are still limited in docs/product surface.
+   - Explicit dead-letter visibility, queue metrics, alerts and a production runbook are still limited in docs/product surface.
+4. Product/demo gap:
+   - PRD now reflects real channel connect UI/API, but the repository still treats that flow as demo-grade until live provider credentials are wired in.
 
 ## MVP Checklist
 
@@ -62,12 +66,12 @@ Scope: Unified Inbox MVP (WhatsApp + Instagram unified support inbox)
 
 ## MVP Progress
 
-Estimated MVP progress: **100%**
+Estimated MVP progress: **100% demo-ready**, **production-ready: not yet**
 
 Rationale:
 - All core backend domain, ingestion pipeline, conversation lifecycle, filters/search, audit log UI, realtime SSE with Redis fanout, Instagram outbound, token encryption, and password-backed auth are complete.
 - Bootstrap reproducibility is solid with runtime checks, smoke script, CI smoke, one-command local demo, and optional realtime smoke coverage.
-- Remaining gaps are now operational/provider follow-ups such as live credentials, richer observability, and MFA.
+- Remaining gaps are now operational/provider follow-ups such as live credentials, richer observability, MFA, and release/runbook hardening.
 
 ## Single Roadmap + Todo System
 
@@ -97,6 +101,7 @@ Use this as the single source of truth, with milestones in [ROADMAP.md](./ROADMA
 - [ ] Performance pass for inbox list on larger datasets
 - [ ] Reporting/analytics baseline
 - [ ] Production deployment guide and runbooks
+- [ ] Dead-letter / queue metrics / alerting operationalization
 
 ---
 

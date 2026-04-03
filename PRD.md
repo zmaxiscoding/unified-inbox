@@ -59,12 +59,12 @@ Unified Inbox, e-ticaret markalarının WhatsApp ve Instagram mesajlarını tek 
 
 ### 3.3 Channel Connect Ekranı
 
-**Açıklama:** WhatsApp ve Instagram kanallarını workspace'e bağlamak için bir ayarlar ekranı. MVP'de gerçek OAuth/API entegrasyonu yoktur; placeholder UI yeterlidir.
+**Açıklama:** WhatsApp ve Instagram kanallarını workspace'e bağlamak için bir ayarlar ekranı. MVP'de gerçek OAuth akışı yoktur, ancak API üzerinden channel account bağlantısı desteklenir.
 
 **Acceptance Criteria:**
 - Ayarlar > Kanallar ekranında WhatsApp ve Instagram için birer kart gösterilir.
-- Her kart "Bağla" butonu içerir; tıklandığında "Yakında" modalı açılır.
-- Bağlı kanal varsa kart üzerinde "Bağlı" badge'i gösterilir (mock veri ile test edilebilir).
+- Her kart bağlantı formu içerir; gönderim sonrası bağlı kanal listesi güncellenir.
+- Bağlı kanal varsa kart üzerinde "Bağlı" badge'i gösterilir.
 - Kanal kartları responsive tasarıma sahiptir.
 
 ---
@@ -149,6 +149,15 @@ Unified Inbox, e-ticaret markalarının WhatsApp ve Instagram mesajlarını tek 
 - Owner, Ayarlar > Audit Log ekranından son 90 günlük log'u görebilir.
 - Log satırları silinemez ve düzenlenemez.
 - Log listesi tarih ve action türüne göre filtrelenebilir.
+
+### 3.9 Release & Ops
+
+**Açıklama:** MVP ile production operability aynı şey değildir; local demo akışı ile canlı kurulum beklentileri ayrıdır.
+
+**Acceptance Criteria:**
+- `demo-ready` akışı `pnpm demo:local`, `pnpm lint`, `pnpm test`, `pnpm build` ve `pnpm smoke:local` ile doğrulanır.
+- `production-ready` kabulü için canlı provider credentials, Redis, secret yönetimi, migrate deploy ve runbook gerekir.
+- Bu dokümanda "tamamlandı" yazan maddeler demo ve local MVP kapsamını ifade eder; production rollout için ayrıca operasyon checklist'i tutulur.
 
 ---
 
