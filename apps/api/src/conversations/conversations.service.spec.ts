@@ -313,18 +313,25 @@ describe("ConversationsService", () => {
   });
 
   it("should assign conversation to a valid membership", async () => {
-    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce({
+        id: "conv_1",
+        assignedMembershipId: null,
+        assignedMembership: null,
+      })
+      .mockResolvedValueOnce({
+        id: "conv_1",
+        assignedMembershipId: "mem_1",
+        assignedMembership: {
+          id: "mem_1",
+          user: { id: "usr_1", name: "Zeynep Demir", email: "agent@acme.com" },
+        },
+      });
     prisma.membership.findFirst.mockResolvedValue({
       id: "mem_1",
       user: { id: "usr_1" },
     });
-    prisma.conversation.update.mockResolvedValue({
-      id: "conv_1",
-      assignedMembership: {
-        id: "mem_1",
-        user: { id: "usr_1", name: "Zeynep Demir", email: "agent@acme.com" },
-      },
-    });
+    prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await service.assignConversation(
       "org_1",
@@ -349,14 +356,54 @@ describe("ConversationsService", () => {
         actorId: "actor_1",
       },
     });
+    expect(prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "conv_1",
+        organizationId: "org_1",
+        assignedMembershipId: null,
+      },
+      data: {
+        assignedMembershipId: "mem_1",
+      },
+    });
+    expect(eventsService.emit).toHaveBeenCalledWith("org_1", {
+      type: "conversation.updated",
+      conversationId: "conv_1",
+      payload: {
+        action: "assigned",
+        id: "conv_1",
+        assignedMembership: {
+          id: "mem_1",
+          user: {
+            id: "usr_1",
+            name: "Zeynep Demir",
+            email: "agent@acme.com",
+          },
+        },
+      },
+    });
   });
 
   it("should unassign conversation when membershipId is null", async () => {
-    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
-    prisma.conversation.update.mockResolvedValue({
-      id: "conv_1",
-      assignedMembership: null,
-    });
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce({
+        id: "conv_1",
+        assignedMembershipId: "mem_1",
+        assignedMembership: {
+          id: "mem_1",
+          user: {
+            id: "usr_1",
+            name: "Zeynep Demir",
+            email: "agent@acme.com",
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        id: "conv_1",
+        assignedMembershipId: null,
+        assignedMembership: null,
+      });
+    prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await service.assignConversation(
       "org_1",
@@ -378,10 +425,24 @@ describe("ConversationsService", () => {
         actorId: "actor_1",
       },
     });
+    expect(prisma.conversation.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: "conv_1",
+        organizationId: "org_1",
+        assignedMembershipId: "mem_1",
+      },
+      data: {
+        assignedMembershipId: null,
+      },
+    });
   });
 
   it("should reject assign when target membership is outside organization", async () => {
-    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: "conv_1",
+      assignedMembershipId: null,
+      assignedMembership: null,
+    });
     prisma.membership.findFirst.mockResolvedValue(null);
 
     await expect(
@@ -400,22 +461,29 @@ describe("ConversationsService", () => {
   });
 
   it("should support self-assignment", async () => {
-    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce({
+        id: "conv_1",
+        assignedMembershipId: null,
+        assignedMembership: null,
+      })
+      .mockResolvedValueOnce({
+        id: "conv_1",
+        assignedMembershipId: "mem_self",
+        assignedMembership: {
+          id: "mem_self",
+          user: {
+            id: "actor_1",
+            name: "Ali Yılmaz",
+            email: "owner@acme.com",
+          },
+        },
+      });
     prisma.membership.findFirst.mockResolvedValue({
       id: "mem_self",
       user: { id: "actor_1" },
     });
-    prisma.conversation.update.mockResolvedValue({
-      id: "conv_1",
-      assignedMembership: {
-        id: "mem_self",
-        user: {
-          id: "actor_1",
-          name: "Ali Yılmaz",
-          email: "owner@acme.com",
-        },
-      },
-    });
+    prisma.conversation.updateMany.mockResolvedValue({ count: 1 });
 
     const result = await service.assignConversation(
       "org_1",
@@ -425,6 +493,70 @@ describe("ConversationsService", () => {
     );
 
     expect(result.assignedMembership?.user.id).toBe("actor_1");
+  });
+
+  it("should no-op assignment when conversation is already assigned to the same membership", async () => {
+    prisma.conversation.findFirst.mockResolvedValue({
+      id: "conv_1",
+      assignedMembershipId: "mem_1",
+      assignedMembership: {
+        id: "mem_1",
+        user: { id: "usr_1", name: "Zeynep Demir", email: "agent@acme.com" },
+      },
+    });
+    prisma.membership.findFirst.mockResolvedValue({
+      id: "mem_1",
+      user: { id: "usr_1" },
+    });
+
+    const result = await service.assignConversation(
+      "org_1",
+      "actor_1",
+      "conv_1",
+      "mem_1",
+    );
+
+    expect(result).toEqual({
+      id: "conv_1",
+      assignedMembership: {
+        id: "mem_1",
+        user: { id: "usr_1", name: "Zeynep Demir", email: "agent@acme.com" },
+      },
+    });
+    expect(prisma.conversation.updateMany).not.toHaveBeenCalled();
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    expect(eventsService.emit).not.toHaveBeenCalled();
+  });
+
+  it("should reject assign when a different assignment wins concurrently", async () => {
+    prisma.conversation.findFirst
+      .mockResolvedValueOnce({
+        id: "conv_1",
+        assignedMembershipId: null,
+        assignedMembership: null,
+      })
+      .mockResolvedValueOnce({
+        id: "conv_1",
+        assignedMembershipId: "mem_other",
+        assignedMembership: {
+          id: "mem_other",
+          user: { id: "usr_9", name: "Başka Ajan", email: "other@acme.com" },
+        },
+      });
+    prisma.membership.findFirst.mockResolvedValue({
+      id: "mem_1",
+      user: { id: "usr_1" },
+    });
+    prisma.conversation.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      service.assignConversation("org_1", "actor_1", "conv_1", "mem_1"),
+    ).rejects.toEqual(
+      new ConflictException("Conversation assignment changed, please retry"),
+    );
+
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
+    expect(eventsService.emit).not.toHaveBeenCalled();
   });
 
   it("should resolve conversation and write audit event", async () => {
@@ -887,7 +1019,7 @@ describe("ConversationsService", () => {
     );
   });
 
-  it("should pass search filter with OR clause for contactName and lastMessageText", async () => {
+  it("should pass search filter with OR clause for contactName, lastMessageText, and historical messages", async () => {
     prisma.conversation.findMany.mockResolvedValue([]);
 
     await service.listConversations("org_1", { search: "kargo" });
@@ -899,6 +1031,13 @@ describe("ConversationsService", () => {
           OR: [
             { contactName: { contains: "kargo", mode: "insensitive" } },
             { lastMessageText: { contains: "kargo", mode: "insensitive" } },
+            {
+              messages: {
+                some: {
+                  body: { contains: "kargo", mode: "insensitive" },
+                },
+              },
+            },
           ],
         },
       }),
@@ -923,6 +1062,13 @@ describe("ConversationsService", () => {
           OR: [
             { contactName: { contains: "test", mode: "insensitive" } },
             { lastMessageText: { contains: "test", mode: "insensitive" } },
+            {
+              messages: {
+                some: {
+                  body: { contains: "test", mode: "insensitive" },
+                },
+              },
+            },
           ],
         },
       }),
