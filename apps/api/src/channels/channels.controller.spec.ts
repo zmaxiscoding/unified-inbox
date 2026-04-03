@@ -13,6 +13,7 @@ describe("ChannelsController", () => {
     listChannels: jest.Mock;
     connectWhatsAppChannel: jest.Mock;
     connectInstagramChannel: jest.Mock;
+    disconnectChannel: jest.Mock;
   };
 
   const session: SessionPayload = {
@@ -29,6 +30,7 @@ describe("ChannelsController", () => {
       listChannels: jest.fn(),
       connectWhatsAppChannel: jest.fn(),
       connectInstagramChannel: jest.fn(),
+      disconnectChannel: jest.fn(),
     };
 
     const module: TestingModule = await Test.createTestingModule({
@@ -49,6 +51,17 @@ describe("ChannelsController", () => {
 
     expect(result).toEqual([{ id: "ca_1" }]);
     expect(service.listChannels).toHaveBeenCalledWith("org_1");
+  });
+
+  it("should reject channel settings reads for AGENT role", () => {
+    expect(() =>
+      controller.listChannels({
+        ...session,
+        role: "AGENT",
+      }),
+    ).toThrow("Only owners can view channel settings");
+
+    expect(service.listChannels).not.toHaveBeenCalled();
   });
 
   it("should connect whatsapp via service", async () => {
@@ -82,7 +95,7 @@ describe("ChannelsController", () => {
         ...session,
         role: "AGENT",
       }),
-    ).toThrow("Only owners can connect channels");
+    ).toThrow("Only owners can manage channels");
 
     expect(service.connectWhatsAppChannel).not.toHaveBeenCalled();
   });
@@ -151,7 +164,7 @@ describe("ChannelsController", () => {
         ...session,
         role: "AGENT",
       }),
-    ).toThrow("Only owners can connect channels");
+    ).toThrow("Only owners can manage channels");
 
     expect(service.connectInstagramChannel).not.toHaveBeenCalled();
   });
@@ -171,5 +184,28 @@ describe("ChannelsController", () => {
     await expect(
       pipe.transform({ instagramAccountId: "   ", accessToken: "token" }, metadata),
     ).rejects.toThrow();
+  });
+
+  it("should disconnect channel via service", async () => {
+    service.disconnectChannel.mockResolvedValue(undefined);
+
+    await controller.disconnectChannel("ca_1", session);
+
+    expect(service.disconnectChannel).toHaveBeenCalledWith(
+      "org_1",
+      "user_1",
+      "ca_1",
+    );
+  });
+
+  it("should reject channel disconnect for AGENT role", () => {
+    expect(() =>
+      controller.disconnectChannel("ca_1", {
+        ...session,
+        role: "AGENT",
+      }),
+    ).toThrow("Only owners can manage channels");
+
+    expect(service.disconnectChannel).not.toHaveBeenCalled();
   });
 });

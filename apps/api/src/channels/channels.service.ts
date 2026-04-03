@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
 } from "@nestjs/common";
 import { ChannelType } from "@prisma/client";
 import { CryptoService } from "../crypto/crypto.service";
@@ -39,14 +40,9 @@ export class ChannelsService {
       },
     });
 
-    return accounts.map((account: ChannelAccountListItem) => ({
-      id: account.id,
-      provider: account.provider,
-      phoneNumberId: account.externalAccountId,
-      displayPhoneNumber: account.displayPhoneNumber,
-      wabaId: account.wabaId,
-      connectedAt: account.createdAt,
-    }));
+    return accounts.map((account: ChannelAccountListItem) =>
+      this.mapChannelAccount(account),
+    );
   }
 
   async connectWhatsAppChannel(
@@ -122,14 +118,7 @@ export class ChannelsService {
         return createdAccount;
       });
 
-      return {
-        id: account.id,
-        provider: account.provider,
-        phoneNumberId: account.externalAccountId,
-        displayPhoneNumber: account.displayPhoneNumber,
-        wabaId: account.wabaId,
-        connectedAt: account.createdAt,
-      };
+      return this.mapChannelAccount(account);
     } catch (error) {
       if (this.isUniqueConstraintError(error)) {
         throw new ConflictException("WhatsApp channel already connected");
@@ -223,6 +212,92 @@ export class ChannelsService {
 
       throw error;
     }
+  }
+
+  async disconnectChannel(
+    organizationId: string,
+    actorUserId: string,
+    channelAccountId: string,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      const account = await tx.channelAccount.findFirst({
+        where: {
+          id: channelAccountId,
+          organizationId,
+        },
+        select: {
+          id: true,
+          provider: true,
+          externalAccountId: true,
+          displayPhoneNumber: true,
+          wabaId: true,
+          createdAt: true,
+        },
+      });
+
+      if (!account) {
+        throw new NotFoundException("Channel not found");
+      }
+
+      await tx.channelAccount.delete({
+        where: { id: account.id },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          action: "channel.disconnected",
+          targetId: account.id,
+          organizationId,
+          actorId: actorUserId,
+          metadata: {
+            provider: account.provider,
+            externalAccountId: account.externalAccountId,
+          },
+        },
+      });
+
+      const channel = await tx.channel.findFirst({
+        where: {
+          organizationId,
+          type: account.provider,
+          externalId: account.externalAccountId,
+          conversations: { none: {} },
+        },
+        select: { id: true },
+      });
+
+      if (!channel) {
+        return;
+      }
+
+      await tx.channel.delete({
+        where: { id: channel.id },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          action: "channel.deleted",
+          targetId: channel.id,
+          organizationId,
+          actorId: actorUserId,
+          metadata: {
+            provider: account.provider,
+            externalAccountId: account.externalAccountId,
+          },
+        },
+      });
+    });
+  }
+
+  private mapChannelAccount(account: ChannelAccountListItem) {
+    return {
+      id: account.id,
+      provider: account.provider,
+      phoneNumberId: account.externalAccountId,
+      displayPhoneNumber: account.displayPhoneNumber,
+      wabaId: account.wabaId,
+      connectedAt: account.createdAt,
+    };
   }
 
   private isUniqueConstraintError(error: unknown) {
