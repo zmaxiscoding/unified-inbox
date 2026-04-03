@@ -13,7 +13,8 @@
     "start": "pnpm check:runtime && next start -p 3000",
     "lint": "pnpm check:runtime && next lint",
     "typecheck": "pnpm check:runtime && node -e \"require('node:fs').rmSync('.next/types', { recursive: true, force: true })\" && tsc --noEmit",
-    "test": "pnpm run typecheck"
+    "test:e2e": "playwright test",
+    "test": "pnpm run typecheck && pnpm run test:e2e"
   },
   "dependencies": {
     "next": "15.2.1",
@@ -21,6 +22,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.55.1",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
