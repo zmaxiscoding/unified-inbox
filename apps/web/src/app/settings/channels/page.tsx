@@ -3,25 +3,38 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+type Role = "OWNER" | "AGENT";
 type User = { id: string; name: string; email: string };
 type Session = { user: User; organization: { id: string; name: string } };
-type ConnectedChannel = {
+type TeamMember = {
+  membershipId: string;
+  role: Role;
+  user: User;
+};
+type TeamData = {
+  members: TeamMember[];
+};
+type ConnectedChannelApi = {
   id: string;
   provider: "WHATSAPP" | "INSTAGRAM" | string;
   phoneNumberId: string;
   displayPhoneNumber: string | null;
-  wabaId: string | null;
   connectedAt: string;
 };
 
-type ConnectWhatsAppResponse = {
+type ConnectedChannelRow = {
   id: string;
   provider: "WHATSAPP" | "INSTAGRAM" | string;
-  phoneNumberId: string;
-  displayPhoneNumber: string | null;
-  wabaId: string | null;
+  providerLabel: string;
+  accountLabel: string;
+  accountValue: string;
+  displayLabel: string;
+  displayValue: string;
   connectedAt: string;
 };
+
+const CHANNELS_FORBIDDEN_MESSAGE =
+  "Bu ekran yalnızca owner rolüne açık. Bağlı kanalları görüntüleyebilirsiniz, ancak yeni bağlantı oluşturamazsınız.";
 
 const getErrorMessage = async (response: Response, fallback: string) => {
   const body = (await response.json().catch(() => null)) as
@@ -45,13 +58,44 @@ const formatDateTime = (value: string) =>
     minute: "2-digit",
   }).format(new Date(value));
 
+function normalizeChannelRow(channel: ConnectedChannelApi): ConnectedChannelRow {
+  if (channel.provider === "INSTAGRAM") {
+    return {
+      id: channel.id,
+      provider: channel.provider,
+      providerLabel: "Instagram",
+      accountLabel: "Instagram Account ID",
+      accountValue: channel.phoneNumberId,
+      displayLabel: "Display Name",
+      displayValue: channel.displayPhoneNumber ?? "-",
+      connectedAt: channel.connectedAt,
+    };
+  }
+
+  return {
+    id: channel.id,
+    provider: channel.provider,
+    providerLabel: "WhatsApp",
+    accountLabel: "Phone Number ID",
+    accountValue: channel.phoneNumberId,
+    displayLabel: "Display Phone Number",
+    displayValue: channel.displayPhoneNumber ?? "-",
+    connectedAt: channel.connectedAt,
+  };
+}
+
 export default function ChannelsSettingsPage() {
   const router = useRouter();
 
   const [session, setSession] = useState<Session | null>(null);
-  const [channels, setChannels] = useState<ConnectedChannel[]>([]);
+  const [channels, setChannels] = useState<ConnectedChannelRow[]>([]);
+  const [currentUserRole, setCurrentUserRole] = useState<Role | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isConnecting, setIsConnecting] = useState(false);
+  const [isConnectingIg, setIsConnectingIg] = useState(false);
+  const [accessDeniedMessage, setAccessDeniedMessage] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   const [phoneNumberId, setPhoneNumberId] = useState("");
@@ -62,7 +106,6 @@ export default function ChannelsSettingsPage() {
   const [igAccountId, setIgAccountId] = useState("");
   const [igAccessToken, setIgAccessToken] = useState("");
   const [igDisplayName, setIgDisplayName] = useState("");
-  const [isConnectingIg, setIsConnectingIg] = useState(false);
 
   const fetchSession = useCallback(async () => {
     const response = await fetch("/api/auth/session", { cache: "no-store" });
@@ -77,6 +120,20 @@ export default function ChannelsSettingsPage() {
     return (await response.json()) as Session;
   }, [router]);
 
+  const fetchTeamRole = useCallback(async (userId: string) => {
+    const response = await fetch("/api/team", { cache: "no-store" });
+    if (response.status === 401) {
+      router.replace("/login");
+      return null;
+    }
+    if (!response.ok) {
+      throw new Error(await getErrorMessage(response, "Takım bilgisi alınamadı."));
+    }
+
+    const data = (await response.json()) as TeamData;
+    return data.members.find((member) => member.user.id === userId)?.role ?? null;
+  }, [router]);
+
   const fetchChannels = useCallback(async () => {
     const response = await fetch("/api/channels", { cache: "no-store" });
     if (response.status === 401) {
@@ -87,15 +144,29 @@ export default function ChannelsSettingsPage() {
       throw new Error(await getErrorMessage(response, "Kanallar alınamadı."));
     }
 
-    return (await response.json()) as ConnectedChannel[];
+    const data = (await response.json()) as ConnectedChannelApi[];
+    return data.map(normalizeChannelRow);
   }, [router]);
 
-  const reloadChannels = useCallback(async () => {
-    const nextChannels = await fetchChannels();
-    if (!nextChannels) return;
+  const reloadRole = useCallback(async () => {
+    if (!session?.user.id) {
+      return;
+    }
 
-    setChannels(nextChannels);
-  }, [fetchChannels]);
+    const nextRole = await fetchTeamRole(session.user.id);
+    if (nextRole) {
+      setCurrentUserRole(nextRole);
+    }
+  }, [fetchTeamRole, session?.user.id]);
+
+  const handleForbidden = useCallback(
+    async (message = CHANNELS_FORBIDDEN_MESSAGE) => {
+      setAccessDeniedMessage(message);
+      setError(null);
+      await reloadRole();
+    },
+    [reloadRole],
+  );
 
   useEffect(() => {
     const init = async () => {
@@ -103,7 +174,18 @@ export default function ChannelsSettingsPage() {
         const nextSession = await fetchSession();
         if (!nextSession) return;
         setSession(nextSession);
-        await reloadChannels();
+
+        const [nextRole, nextChannels] = await Promise.all([
+          fetchTeamRole(nextSession.user.id),
+          fetchChannels(),
+        ]);
+
+        if (nextRole) {
+          setCurrentUserRole(nextRole);
+        }
+        if (nextChannels) {
+          setChannels(nextChannels);
+        }
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Veriler yüklenirken hata oluştu.",
@@ -114,7 +196,10 @@ export default function ChannelsSettingsPage() {
     };
 
     void init();
-  }, [fetchSession, reloadChannels]);
+  }, [fetchChannels, fetchSession, fetchTeamRole]);
+
+  const isOwner = currentUserRole === "OWNER";
+  const canManageChannels = isOwner && !accessDeniedMessage;
 
   const connectedWhatsAppCount = useMemo(
     () => channels.filter((channel) => channel.provider === "WHATSAPP").length,
@@ -151,13 +236,19 @@ export default function ChannelsSettingsPage() {
         router.replace("/login");
         return;
       }
+      if (response.status === 403) {
+        await handleForbidden();
+        return;
+      }
       if (!response.ok) {
         throw new Error(
           await getErrorMessage(response, "Instagram kanalı bağlanamadı."),
         );
       }
 
-      const created = (await response.json()) as ConnectedChannel;
+      const created = normalizeChannelRow(
+        (await response.json()) as ConnectedChannelApi,
+      );
       setChannels((current) => [created, ...current]);
       setIgAccountId("");
       setIgAccessToken("");
@@ -195,13 +286,19 @@ export default function ChannelsSettingsPage() {
         router.replace("/login");
         return;
       }
+      if (response.status === 403) {
+        await handleForbidden();
+        return;
+      }
       if (!response.ok) {
         throw new Error(
           await getErrorMessage(response, "WhatsApp kanalı bağlanamadı."),
         );
       }
 
-      const created = (await response.json()) as ConnectWhatsAppResponse;
+      const created = normalizeChannelRow(
+        (await response.json()) as ConnectedChannelApi,
+      );
       setChannels((current) => [created, ...current]);
       setPhoneNumberId("");
       setAccessToken("");
@@ -273,6 +370,19 @@ export default function ChannelsSettingsPage() {
           </div>
         ) : null}
 
+        {accessDeniedMessage ? (
+          <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {accessDeniedMessage}
+          </div>
+        ) : null}
+
+        {!isOwner ? (
+          <div className="mb-5 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+            Bağlı kanalları görüntüleyebilirsiniz. Yeni kanal bağlama işlemi
+            yalnızca owner rolüne açıktır.
+          </div>
+        ) : null}
+
         <section className="mb-8 rounded-lg border border-slate-200 bg-white p-5">
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-700">
@@ -283,63 +393,69 @@ export default function ChannelsSettingsPage() {
             </span>
           </div>
 
-          <form onSubmit={handleConnectWhatsApp} className="grid gap-3 md:grid-cols-2">
-            <label className="text-sm text-slate-700">
-              Phone Number ID *
-              <input
-                type="text"
-                value={phoneNumberId}
-                onChange={(event) => setPhoneNumberId(event.target.value)}
-                className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
-                placeholder="e.g. 123456789012345"
-                required
-              />
-            </label>
+          {canManageChannels ? (
+            <form onSubmit={handleConnectWhatsApp} className="grid gap-3 md:grid-cols-2">
+              <label className="text-sm text-slate-700">
+                Phone Number ID *
+                <input
+                  type="text"
+                  value={phoneNumberId}
+                  onChange={(event) => setPhoneNumberId(event.target.value)}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
+                  placeholder="e.g. 123456789012345"
+                  required
+                />
+              </label>
 
-            <label className="text-sm text-slate-700">
-              Access Token *
-              <input
-                type="password"
-                value={accessToken}
-                onChange={(event) => setAccessToken(event.target.value)}
-                className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
-                placeholder="EAAG..."
-                required
-              />
-            </label>
+              <label className="text-sm text-slate-700">
+                Access Token *
+                <input
+                  type="password"
+                  value={accessToken}
+                  onChange={(event) => setAccessToken(event.target.value)}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
+                  placeholder="EAAG..."
+                  required
+                />
+              </label>
 
-            <label className="text-sm text-slate-700">
-              Display Phone Number
-              <input
-                type="text"
-                value={displayPhoneNumber}
-                onChange={(event) => setDisplayPhoneNumber(event.target.value)}
-                className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
-                placeholder="+90 555 111 22 33"
-              />
-            </label>
+              <label className="text-sm text-slate-700">
+                Display Phone Number
+                <input
+                  type="text"
+                  value={displayPhoneNumber}
+                  onChange={(event) => setDisplayPhoneNumber(event.target.value)}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
+                  placeholder="+90 555 111 22 33"
+                />
+              </label>
 
-            <label className="text-sm text-slate-700">
-              WABA ID
-              <input
-                type="text"
-                value={wabaId}
-                onChange={(event) => setWabaId(event.target.value)}
-                className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
-                placeholder="1029384756"
-              />
-            </label>
+              <label className="text-sm text-slate-700">
+                WABA ID
+                <input
+                  type="text"
+                  value={wabaId}
+                  onChange={(event) => setWabaId(event.target.value)}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
+                  placeholder="1029384756"
+                />
+              </label>
 
-            <div className="md:col-span-2">
-              <button
-                type="submit"
-                disabled={isConnecting}
-                className="h-10 rounded-lg bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-              >
-                {isConnecting ? "Bağlanıyor..." : "Connect WhatsApp"}
-              </button>
-            </div>
-          </form>
+              <div className="md:col-span-2">
+                <button
+                  type="submit"
+                  disabled={isConnecting}
+                  className="h-10 rounded-lg bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                >
+                  {isConnecting ? "Bağlanıyor..." : "Connect WhatsApp"}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <p className="text-sm text-slate-500">
+              Owner rolünde olduğunuzda WhatsApp bağlantısı ekleyebilirsiniz.
+            </p>
+          )}
         </section>
 
         <section className="mb-8 rounded-lg border border-slate-200 bg-white p-5">
@@ -352,52 +468,58 @@ export default function ChannelsSettingsPage() {
             </span>
           </div>
 
-          <form onSubmit={handleConnectInstagram} className="grid gap-3 md:grid-cols-2">
-            <label className="text-sm text-slate-700">
-              Instagram Account ID *
-              <input
-                type="text"
-                value={igAccountId}
-                onChange={(event) => setIgAccountId(event.target.value)}
-                className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
-                placeholder="e.g. 17841400123456789"
-                required
-              />
-            </label>
+          {canManageChannels ? (
+            <form onSubmit={handleConnectInstagram} className="grid gap-3 md:grid-cols-2">
+              <label className="text-sm text-slate-700">
+                Instagram Account ID *
+                <input
+                  type="text"
+                  value={igAccountId}
+                  onChange={(event) => setIgAccountId(event.target.value)}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
+                  placeholder="e.g. 17841400123456789"
+                  required
+                />
+              </label>
 
-            <label className="text-sm text-slate-700">
-              Access Token *
-              <input
-                type="password"
-                value={igAccessToken}
-                onChange={(event) => setIgAccessToken(event.target.value)}
-                className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
-                placeholder="EAAG..."
-                required
-              />
-            </label>
+              <label className="text-sm text-slate-700">
+                Access Token *
+                <input
+                  type="password"
+                  value={igAccessToken}
+                  onChange={(event) => setIgAccessToken(event.target.value)}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
+                  placeholder="EAAG..."
+                  required
+                />
+              </label>
 
-            <label className="text-sm text-slate-700">
-              Display Name
-              <input
-                type="text"
-                value={igDisplayName}
-                onChange={(event) => setIgDisplayName(event.target.value)}
-                className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
-                placeholder="@myshop"
-              />
-            </label>
+              <label className="text-sm text-slate-700">
+                Display Name
+                <input
+                  type="text"
+                  value={igDisplayName}
+                  onChange={(event) => setIgDisplayName(event.target.value)}
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-300 px-3 text-sm outline-none focus:border-slate-500"
+                  placeholder="@myshop"
+                />
+              </label>
 
-            <div className="flex items-end">
-              <button
-                type="submit"
-                disabled={isConnectingIg}
-                className="h-10 rounded-lg bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-              >
-                {isConnectingIg ? "Bağlanıyor..." : "Connect Instagram"}
-              </button>
-            </div>
-          </form>
+              <div className="flex items-end">
+                <button
+                  type="submit"
+                  disabled={isConnectingIg}
+                  className="h-10 rounded-lg bg-slate-900 px-4 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                >
+                  {isConnectingIg ? "Bağlanıyor..." : "Connect Instagram"}
+                </button>
+              </div>
+            </form>
+          ) : (
+            <p className="text-sm text-slate-500">
+              Owner rolünde olduğunuzda Instagram bağlantısı ekleyebilirsiniz.
+            </p>
+          )}
         </section>
 
         <section className="rounded-lg border border-slate-200 bg-white p-5">
@@ -413,7 +535,7 @@ export default function ChannelsSettingsPage() {
                 <thead>
                   <tr className="border-b border-slate-100 bg-slate-50 text-left text-xs font-medium uppercase text-slate-500">
                     <th className="px-4 py-3">Provider</th>
-                    <th className="px-4 py-3">Account ID</th>
+                    <th className="px-4 py-3">Account</th>
                     <th className="px-4 py-3">Display</th>
                     <th className="px-4 py-3">Connected At</th>
                   </tr>
@@ -422,11 +544,19 @@ export default function ChannelsSettingsPage() {
                   {channels.map((channel) => (
                     <tr key={channel.id} className="border-b border-slate-50 last:border-0">
                       <td className="px-4 py-3 font-medium text-slate-900">
-                        {channel.provider}
+                        {channel.providerLabel}
                       </td>
-                      <td className="px-4 py-3 text-slate-700">{channel.phoneNumberId}</td>
                       <td className="px-4 py-3 text-slate-700">
-                        {channel.displayPhoneNumber ?? "-"}
+                        <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                          {channel.accountLabel}
+                        </span>
+                        <span className="break-all">{channel.accountValue}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">
+                        <span className="block text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                          {channel.displayLabel}
+                        </span>
+                        <span className="break-all">{channel.displayValue}</span>
                       </td>
                       <td className="px-4 py-3 text-slate-500">
                         {formatDateTime(channel.connectedAt)}
