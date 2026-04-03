@@ -398,4 +398,104 @@ describe("WebhooksWorkerService", () => {
       },
     });
   });
+
+  it("should rethrow transient processing errors before the final attempt", async () => {
+    prisma.rawWebhookEvent.findUnique.mockResolvedValue({
+      ...BASE_RAW_EVENT,
+      payload: {
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  metadata: { phone_number_id: "12345" },
+                  contacts: [{ wa_id: "905551112233", profile: { name: "Ali" } }],
+                  messages: [
+                    {
+                      id: "wamid.retry_1",
+                      from: "905551112233",
+                      type: "text",
+                      text: { body: "retry me" },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    prisma.channel.upsert.mockResolvedValue({ id: "ch_1" });
+    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.message.create.mockRejectedValue(new Error("temporary db outage"));
+
+    await expect(service.processRawEvent("rwe_1")).rejects.toThrow("temporary db outage");
+
+    expect(prisma.rawWebhookEvent.update).not.toHaveBeenCalled();
+  });
+
+  it("should mark transient errors as failed on the final attempt and rethrow", async () => {
+    prisma.rawWebhookEvent.findUnique.mockResolvedValue({
+      ...BASE_RAW_EVENT,
+      payload: {
+        entry: [
+          {
+            changes: [
+              {
+                value: {
+                  metadata: { phone_number_id: "12345" },
+                  contacts: [{ wa_id: "905551112233", profile: { name: "Ali" } }],
+                  messages: [
+                    {
+                      id: "wamid.retry_2",
+                      from: "905551112233",
+                      type: "text",
+                      text: { body: "last try" },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+    prisma.channel.upsert.mockResolvedValue({ id: "ch_1" });
+    prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
+    prisma.message.create.mockRejectedValue(new Error("database still unavailable"));
+    prisma.rawWebhookEvent.update.mockResolvedValue({});
+
+    await expect(
+      service.processRawEvent("rwe_1", { finalAttempt: true }),
+    ).rejects.toThrow("database still unavailable");
+
+    expect(prisma.rawWebhookEvent.update).toHaveBeenCalledWith({
+      where: { id: "rwe_1" },
+      data: {
+        processingStatus: "FAILED",
+        processedAt: expect.any(Date),
+        error: "database still unavailable",
+      },
+    });
+  });
+
+  it("should mark unsupported providers as failed without retrying", async () => {
+    prisma.rawWebhookEvent.findUnique.mockResolvedValue({
+      ...BASE_RAW_EVENT,
+      provider: "EMAIL",
+      payload: {},
+    });
+    prisma.rawWebhookEvent.update.mockResolvedValue({});
+
+    await expect(service.processRawEvent("rwe_1")).resolves.toBeUndefined();
+
+    expect(prisma.rawWebhookEvent.update).toHaveBeenCalledWith({
+      where: { id: "rwe_1" },
+      data: {
+        processingStatus: "FAILED",
+        processedAt: expect.any(Date),
+        error: "Unsupported webhook provider: EMAIL",
+      },
+    });
+  });
 });

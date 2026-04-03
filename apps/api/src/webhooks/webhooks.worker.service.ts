@@ -24,6 +24,17 @@ type RawWebhookEventRecord = {
   processingStatus: WebhookProcessingStatus;
 };
 
+type ProcessRawEventOptions = {
+  finalAttempt?: boolean;
+};
+
+class NonRetryableWebhookProcessingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NonRetryableWebhookProcessingError";
+  }
+}
+
 @Injectable()
 export class WebhooksWorkerService {
   constructor(
@@ -31,7 +42,10 @@ export class WebhooksWorkerService {
     private readonly eventsService: EventsService,
   ) {}
 
-  async processRawEvent(rawWebhookEventId: string) {
+  async processRawEvent(
+    rawWebhookEventId: string,
+    options: ProcessRawEventOptions = {},
+  ) {
     const rawEvent = await this.prisma.rawWebhookEvent.findUnique({
       where: { id: rawWebhookEventId },
       select: {
@@ -64,7 +78,9 @@ export class WebhooksWorkerService {
       } else if (rawEvent.provider === ChannelType.INSTAGRAM) {
         normalizedMessage = extractInstagramTextMessage(rawEvent.payload);
       } else {
-        throw new Error(`Unsupported webhook provider: ${rawEvent.provider}`);
+        throw new NonRetryableWebhookProcessingError(
+          `Unsupported webhook provider: ${rawEvent.provider}`,
+        );
       }
 
       if (!normalizedMessage && statusUpdates.length === 0) {
@@ -116,14 +132,16 @@ export class WebhooksWorkerService {
         });
       }
     } catch (error) {
-      await this.prisma.rawWebhookEvent.update({
-        where: { id: rawWebhookEventId },
-        data: {
-          processingStatus: WebhookProcessingStatus.FAILED,
-          processedAt: new Date(),
-          error: this.toErrorMessage(error),
-        },
-      });
+      if (this.isNonRetryableError(error)) {
+        await this.markRawEventAsFailed(rawWebhookEventId, error);
+        return;
+      }
+
+      if (options.finalAttempt) {
+        await this.markRawEventAsFailed(rawWebhookEventId, error);
+      }
+
+      throw error;
     }
   }
 
@@ -333,6 +351,17 @@ export class WebhooksWorkerService {
     });
   }
 
+  private async markRawEventAsFailed(rawWebhookEventId: string, error: unknown) {
+    await this.prisma.rawWebhookEvent.update({
+      where: { id: rawWebhookEventId },
+      data: {
+        processingStatus: WebhookProcessingStatus.FAILED,
+        processedAt: new Date(),
+        error: this.toErrorMessage(error),
+      },
+    });
+  }
+
   private async getOrCreateConversation(
     tx: Prisma.TransactionClient,
     organizationId: string,
@@ -394,6 +423,10 @@ export class WebhooksWorkerService {
     }
 
     return (error as { code?: string }).code === "P2002";
+  }
+
+  private isNonRetryableError(error: unknown) {
+    return error instanceof NonRetryableWebhookProcessingError;
   }
 
   private toErrorMessage(error: unknown) {
