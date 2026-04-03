@@ -17,6 +17,9 @@ type Session = { user: User; organization: { id: string; name: string } };
 type TeamData = { members: Member[]; invites: Invite[] };
 type InviteCreateResponse = { inviteId: string; inviteLink: string };
 
+const TEAM_FORBIDDEN_MESSAGE =
+  "Bu alan yalnızca owner rolüne açık. Takım listesini görebilirsiniz, ancak yönetim işlemleri yapamazsınız.";
+
 const getErrorMessage = async (response: Response, fallback: string) => {
   const body = (await response.json().catch(() => null)) as
     | { message?: string | string[] }
@@ -51,6 +54,9 @@ export default function TeamSettingsPage() {
   const [inviteLink, setInviteLink] = useState<string | null>(null);
   const [isCopied, setIsCopied] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [accessDeniedMessage, setAccessDeniedMessage] = useState<string | null>(
+    null,
+  );
 
   const fetchSession = useCallback(async () => {
     const response = await fetch("/api/auth/session", { cache: "no-store" });
@@ -109,6 +115,18 @@ export default function TeamSettingsPage() {
     [session?.user.id, team?.members],
   );
   const isOwner = currentUserRole === "OWNER";
+  const canManageTeam = isOwner && !accessDeniedMessage;
+
+  const handleForbidden = useCallback(
+    async (message = TEAM_FORBIDDEN_MESSAGE) => {
+      setAccessDeniedMessage(message);
+      setBusyId(null);
+      setIsInviting(false);
+      setInviteLink(null);
+      await reloadTeam();
+    },
+    [reloadTeam],
+  );
 
   const handleInvite = async () => {
     if (!inviteEmail.trim() || isInviting) return;
@@ -126,6 +144,10 @@ export default function TeamSettingsPage() {
 
       if (response.status === 401) {
         router.replace("/login");
+        return;
+      }
+      if (response.status === 403) {
+        await handleForbidden();
         return;
       }
       if (!response.ok) {
@@ -168,6 +190,10 @@ export default function TeamSettingsPage() {
         router.replace("/login");
         return;
       }
+      if (response.status === 403) {
+        await handleForbidden();
+        return;
+      }
       if (!response.ok && response.status !== 204) {
         throw new Error(await getErrorMessage(response, "Davet iptal edilemedi."));
       }
@@ -192,6 +218,10 @@ export default function TeamSettingsPage() {
       });
       if (response.status === 401) {
         router.replace("/login");
+        return;
+      }
+      if (response.status === 403) {
+        await handleForbidden();
         return;
       }
       if (!response.ok) {
@@ -220,6 +250,10 @@ export default function TeamSettingsPage() {
       });
       if (response.status === 401) {
         router.replace("/login");
+        return;
+      }
+      if (response.status === 403) {
+        await handleForbidden();
         return;
       }
       if (!response.ok && response.status !== 204) {
@@ -293,6 +327,19 @@ export default function TeamSettingsPage() {
           </div>
         ) : null}
 
+        {accessDeniedMessage ? (
+          <div className="mb-5 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            {accessDeniedMessage}
+          </div>
+        ) : null}
+
+        {!isOwner ? (
+          <div className="mb-5 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+            Takımı görüntüleyebilirsiniz. Yönetim işlemleri yalnızca owner
+            rolüne açıktır.
+          </div>
+        ) : null}
+
         <section className="mb-8">
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-700">
             Members ({team.members.length})
@@ -304,7 +351,7 @@ export default function TeamSettingsPage() {
                   <th className="px-4 py-3">Name</th>
                   <th className="px-4 py-3">Email</th>
                   <th className="px-4 py-3">Role</th>
-                  {isOwner ? <th className="px-4 py-3 text-right">Actions</th> : null}
+                  {canManageTeam ? <th className="px-4 py-3 text-right">Actions</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -335,7 +382,7 @@ export default function TeamSettingsPage() {
                           {member.role}
                         </span>
                       </td>
-                      {isOwner ? (
+                      {canManageTeam ? (
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-2">
                             <select
@@ -376,7 +423,7 @@ export default function TeamSettingsPage() {
           </div>
         </section>
 
-        {isOwner ? (
+        {canManageTeam ? (
           <section>
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-700">
               Invites
