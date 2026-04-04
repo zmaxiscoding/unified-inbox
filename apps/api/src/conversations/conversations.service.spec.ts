@@ -3,6 +3,7 @@ import {
   ConflictException,
   NotFoundException,
 } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { EventsService } from "../events/events.service";
 import { OutboundQueueService } from "../outbound/outbound.queue.service";
 import { PrismaService } from "../prisma/prisma.service";
@@ -38,6 +39,7 @@ describe("ConversationsService", () => {
     conversationTag: {
       findMany: jest.Mock;
       findUnique: jest.Mock;
+      create: jest.Mock;
       upsert: jest.Mock;
       delete: jest.Mock;
     };
@@ -45,6 +47,7 @@ describe("ConversationsService", () => {
       findMany: jest.Mock;
       create: jest.Mock;
     };
+    $queryRawUnsafe: jest.Mock;
     $transaction: jest.Mock;
   };
   let outboundQueue: {
@@ -77,6 +80,7 @@ describe("ConversationsService", () => {
       conversationTag: {
         findMany: jest.fn(),
         findUnique: jest.fn(),
+        create: jest.fn(),
         upsert: jest.fn(),
         delete: jest.fn(),
       },
@@ -84,6 +88,7 @@ describe("ConversationsService", () => {
         findMany: jest.fn(),
         create: jest.fn(),
       },
+      $queryRawUnsafe: jest.fn(),
       $transaction: jest.fn(async (arg: unknown) => {
         if (typeof arg === "function") {
           return (arg as (tx: unknown) => unknown)(prisma);
@@ -106,10 +111,10 @@ describe("ConversationsService", () => {
   });
 
   it("should create outbound message as QUEUED and enqueue a send job", async () => {
-    prisma.conversation.findFirst.mockResolvedValue({
+    prisma.$queryRawUnsafe.mockResolvedValue([{
       id: "conv_1",
       status: "OPEN",
-    });
+    }]);
     prisma.message.create.mockResolvedValue({
       id: "msg_1",
       direction: "OUTBOUND",
@@ -172,10 +177,10 @@ describe("ConversationsService", () => {
   });
 
   it("should mark outbound message as FAILED when enqueue fails", async () => {
-    prisma.conversation.findFirst.mockResolvedValue({
+    prisma.$queryRawUnsafe.mockResolvedValue([{
       id: "conv_1",
       status: "OPEN",
-    });
+    }]);
     prisma.message.create.mockResolvedValue({
       id: "msg_2",
       direction: "OUTBOUND",
@@ -204,10 +209,10 @@ describe("ConversationsService", () => {
   });
 
   it("should block outbound messages for resolved conversations", async () => {
-    prisma.conversation.findFirst.mockResolvedValue({
+    prisma.$queryRawUnsafe.mockResolvedValue([{
       id: "conv_1",
       status: "RESOLVED",
-    });
+    }]);
 
     await expect(
       service.createOutboundMessage("org_1", "usr_1", "conv_1", "Merhaba"),
@@ -749,8 +754,7 @@ describe("ConversationsService", () => {
   it("should add tag: create-or-reuse tag + attach to conversation", async () => {
     prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
     prisma.tag.upsert.mockResolvedValue({ id: "t1", name: "vip" });
-    prisma.conversationTag.findUnique.mockResolvedValue(null);
-    prisma.conversationTag.upsert.mockResolvedValue({});
+    prisma.conversationTag.create.mockResolvedValue({});
 
     const result = await service.addTagToConversation(
       "org_1",
@@ -765,10 +769,8 @@ describe("ConversationsService", () => {
       update: {},
       create: { name: "vip", organizationId: "org_1" },
     });
-    expect(prisma.conversationTag.upsert).toHaveBeenCalledWith({
-      where: { conversationId_tagId: { conversationId: "conv_1", tagId: "t1" } },
-      update: {},
-      create: { conversationId: "conv_1", tagId: "t1" },
+    expect(prisma.conversationTag.create).toHaveBeenCalledWith({
+      data: { conversationId: "conv_1", tagId: "t1" },
     });
     expect(prisma.auditLog.create).toHaveBeenCalledWith({
       data: {
@@ -792,19 +794,15 @@ describe("ConversationsService", () => {
   it("should not duplicate tag audit logs when tag is already attached", async () => {
     prisma.conversation.findFirst.mockResolvedValue({ id: "conv_1" });
     prisma.tag.upsert.mockResolvedValue({ id: "t1", name: "vip" });
-    prisma.conversationTag.findUnique.mockResolvedValue({
-      conversationId: "conv_1",
-      tagId: "t1",
-    });
+    const uniqueError = new Prisma.PrismaClientKnownRequestError(
+      "Unique constraint failed",
+      { code: "P2002", clientVersion: "6.0.0", meta: {} },
+    );
+    prisma.conversationTag.create.mockRejectedValue(uniqueError);
 
     await service.addTagToConversation("org_1", "actor_1", "conv_1", "vip");
 
-    expect(prisma.conversationTag.upsert).not.toHaveBeenCalled();
-    expect(prisma.auditLog.create).not.toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        action: "conversation.tag_added",
-      }),
-    });
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
 
   it("should remove tag from conversation", async () => {

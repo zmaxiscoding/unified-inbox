@@ -249,16 +249,17 @@ export class ConversationsService {
     const normalizedText = text.trim();
 
     const message = await this.prisma.$transaction(async (tx) => {
-      const conversation = await tx.conversation.findFirst({
-        where: {
-          id: conversationId,
-          organizationId,
-        },
-        select: {
-          id: true,
-          status: true,
-        },
-      });
+      // Lock the row to prevent a concurrent resolve from slipping in
+      // between the status check and the message insert.
+      const rows = await tx.$queryRawUnsafe<
+        { id: string; status: string }[]
+      >(
+        `SELECT id, status FROM "Conversation" WHERE id = $1 AND "organizationId" = $2 FOR UPDATE`,
+        conversationId,
+        organizationId,
+      );
+
+      const conversation = rows[0];
 
       if (!conversation) {
         throw new NotFoundException("Conversation not found");
@@ -664,25 +665,11 @@ export class ConversationsService {
         create: { name, organizationId },
       });
 
-      const existingLink = await tx.conversationTag.findUnique({
-        where: {
-          conversationId_tagId: {
-            conversationId: conversation.id,
-            tagId: tag.id,
-          },
-        },
-      });
-
-      if (!existingLink) {
-        await tx.conversationTag.upsert({
-          where: {
-            conversationId_tagId: {
-              conversationId: conversation.id,
-              tagId: tag.id,
-            },
-          },
-          update: {},
-          create: { conversationId: conversation.id, tagId: tag.id },
+      // Use create + catch unique violation so the audit log is only
+      // written when this request actually inserted the link row.
+      try {
+        await tx.conversationTag.create({
+          data: { conversationId: conversation.id, tagId: tag.id },
         });
 
         await tx.auditLog.create({
@@ -697,6 +684,16 @@ export class ConversationsService {
             actorId: actorUserId,
           },
         });
+      } catch (error) {
+        // P2002 = unique constraint violation — tag already linked
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2002"
+        ) {
+          // no-op: tag already exists on this conversation
+        } else {
+          throw error;
+        }
       }
 
       return { tag };
