@@ -246,16 +246,19 @@ describe("ConversationsService", () => {
 
     const result = await service.listConversationMessages("org_1", "conv_1");
 
-    expect(result).toEqual([
-      {
-        id: "msg_1",
-        direction: "INBOUND",
-        text: "Merhaba",
-        deliveryStatus: null,
-        createdAt: new Date("2026-03-05T10:00:00.000Z"),
-        senderDisplay: "Ahmet Kaya",
-      },
-    ]);
+    expect(result).toEqual({
+      messages: [
+        {
+          id: "msg_1",
+          direction: "INBOUND",
+          text: "Merhaba",
+          deliveryStatus: null,
+          createdAt: new Date("2026-03-05T10:00:00.000Z"),
+          senderDisplay: "Ahmet Kaya",
+        },
+      ],
+      markedAsRead: true,
+    });
     expect(prisma.conversation.updateMany).toHaveBeenCalledWith({
       where: {
         id: "conv_1",

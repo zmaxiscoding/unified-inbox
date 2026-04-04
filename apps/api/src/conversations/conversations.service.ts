@@ -235,9 +235,12 @@ export class ConversationsService {
       });
     }
 
-    return messages.map((message: MessageWithRelations) =>
-      this.toMessageResponse(message),
-    );
+    return {
+      messages: messages.map((message: MessageWithRelations) =>
+        this.toMessageResponse(message),
+      ),
+      markedAsRead,
+    };
   }
 
   async createOutboundMessage(
