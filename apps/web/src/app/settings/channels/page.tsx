@@ -126,6 +126,10 @@ export default function ChannelsSettingsPage() {
       router.replace("/login");
       return null;
     }
+    if (response.status === 403) {
+      // AGENT role cannot access GET /team — default to AGENT
+      return "AGENT" as const;
+    }
     if (!response.ok) {
       throw new Error(await getErrorMessage(response, "Takım bilgisi alınamadı."));
     }
@@ -175,16 +179,24 @@ export default function ChannelsSettingsPage() {
         if (!nextSession) return;
         setSession(nextSession);
 
-        const [nextRole, nextChannels] = await Promise.all([
+        // Fetch role and channels independently — role failure must not block channels
+        const [roleResult, channelsResult] = await Promise.allSettled([
           fetchTeamRole(nextSession.user.id),
           fetchChannels(),
         ]);
 
-        if (nextRole) {
-          setCurrentUserRole(nextRole);
+        if (roleResult.status === "fulfilled" && roleResult.value) {
+          setCurrentUserRole(roleResult.value);
         }
-        if (nextChannels) {
-          setChannels(nextChannels);
+
+        if (channelsResult.status === "fulfilled" && channelsResult.value) {
+          setChannels(channelsResult.value);
+        } else if (channelsResult.status === "rejected") {
+          setError(
+            channelsResult.reason instanceof Error
+              ? channelsResult.reason.message
+              : "Kanallar alınamadı.",
+          );
         }
       } catch (err) {
         setError(
