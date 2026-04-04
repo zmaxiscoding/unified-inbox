@@ -603,6 +603,10 @@ export class TeamService {
         throw new NotFoundException("Membership not found");
       }
 
+      if (targetMembership.userId === actorUserId) {
+        throw new BadRequestException("Cannot change your own role");
+      }
+
       if (targetMembership.role === Role.OWNER && role === Role.AGENT) {
         const ownerCount = await tx.membership.count({
           where: { organizationId, role: Role.OWNER },

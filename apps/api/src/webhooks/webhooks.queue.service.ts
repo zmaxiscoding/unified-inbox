@@ -71,7 +71,14 @@ export class WebhooksQueueService implements OnModuleInit, OnModuleDestroy {
     }
 
     setImmediate(() => {
-      void this.worker.processRawEvent(rawWebhookEventId);
+      void this.worker
+        .processRawEvent(rawWebhookEventId, { finalAttempt: true })
+        .catch((error: unknown) => {
+          this.logger.error(
+            `Inline webhook processing failed for ${rawWebhookEventId}`,
+            this.toErrorMessage(error),
+          );
+        });
     });
   }
 
@@ -87,7 +94,10 @@ export class WebhooksQueueService implements OnModuleInit, OnModuleDestroy {
     this.queueWorker = new Worker<QueueJobData>(
       this.queueName,
       async (job) => {
-        await this.worker.processRawEvent(job.data.rawWebhookEventId);
+        const configuredAttempts = job.opts.attempts ?? 1;
+        await this.worker.processRawEvent(job.data.rawWebhookEventId, {
+          finalAttempt: job.attemptsMade + 1 >= configuredAttempts,
+        });
       },
       { connection, concurrency: 5 },
     );

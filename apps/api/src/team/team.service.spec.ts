@@ -791,6 +791,23 @@ describe("TeamService", () => {
     );
   });
 
+  it("should reject changing your own role", async () => {
+    prisma.membership.findUnique.mockResolvedValue({
+      id: "mem_1",
+      role: "OWNER",
+      userId: "u1",
+    });
+    prisma.membership.findFirst.mockResolvedValue({
+      id: "mem_1",
+      role: "OWNER",
+      userId: "u1",
+    });
+
+    await expect(
+      service.updateMemberRole("org_1", "u1", "mem_1", Role.AGENT),
+    ).rejects.toEqual(new BadRequestException("Cannot change your own role"));
+  });
+
   it("should update member role successfully", async () => {
     prisma.membership.findUnique.mockResolvedValue({
       id: "mem_1",

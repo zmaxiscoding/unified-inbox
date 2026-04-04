@@ -1,4 +1,5 @@
-import { Controller, Get, UseGuards } from "@nestjs/common";
+import { Controller, ForbiddenException, Get, UseGuards } from "@nestjs/common";
+import { Role } from "@prisma/client";
 import { Session } from "../auth/session.decorator";
 import { SessionPayload } from "../auth/auth.types";
 import { SessionAuthGuard } from "../auth/session-auth.guard";
@@ -11,6 +12,13 @@ export class TeamController {
 
   @Get()
   getTeam(@Session() session: SessionPayload) {
+    this.assertOwner(session);
     return this.teamService.getTeam(session.organizationId);
+  }
+
+  private assertOwner(session: SessionPayload) {
+    if (session.role !== Role.OWNER) {
+      throw new ForbiddenException("Only owners can view team settings");
+    }
   }
 }

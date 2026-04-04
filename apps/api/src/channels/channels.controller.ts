@@ -1,8 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
+  HttpCode,
+  Param,
   Post,
   UseGuards,
   UsePipes,
@@ -38,9 +41,7 @@ export class ChannelsController {
     @Body() body: ConnectWhatsAppChannelDto,
     @Session() session: SessionPayload,
   ) {
-    if (session.role !== Role.OWNER) {
-      throw new ForbiddenException("Only owners can connect channels");
-    }
+    this.assertOwner(session, "Only owners can manage channels");
 
     return this.channelsService.connectWhatsAppChannel(
       session.organizationId,
@@ -61,14 +62,33 @@ export class ChannelsController {
     @Body() body: ConnectInstagramChannelDto,
     @Session() session: SessionPayload,
   ) {
-    if (session.role !== Role.OWNER) {
-      throw new ForbiddenException("Only owners can connect channels");
-    }
+    this.assertOwner(session, "Only owners can manage channels");
 
     return this.channelsService.connectInstagramChannel(
       session.organizationId,
       session.userId,
       body,
     );
+  }
+
+  @Delete(":id")
+  @HttpCode(204)
+  disconnectChannel(
+    @Param("id") id: string,
+    @Session() session: SessionPayload,
+  ) {
+    this.assertOwner(session, "Only owners can manage channels");
+
+    return this.channelsService.disconnectChannel(
+      session.organizationId,
+      session.userId,
+      id,
+    );
+  }
+
+  private assertOwner(session: SessionPayload, message: string) {
+    if (session.role !== Role.OWNER) {
+      throw new ForbiddenException(message);
+    }
   }
 }

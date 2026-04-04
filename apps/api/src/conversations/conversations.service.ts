@@ -44,6 +44,19 @@ type ConversationListItem = {
   tags: { tag: { id: string; name: string } }[];
 };
 
+type ConversationAssignmentRecord = {
+  id: string;
+  assignedMembershipId: string | null;
+  assignedMembership: {
+    id: string;
+    user: {
+      id: string;
+      name: string;
+      email: string;
+    };
+  } | null;
+};
+
 @Injectable()
 export class ConversationsService {
   constructor(
@@ -80,6 +93,13 @@ export class ConversationsService {
         where.OR = [
           { contactName: { contains: term, mode: "insensitive" } },
           { lastMessageText: { contains: term, mode: "insensitive" } },
+          {
+            messages: {
+              some: {
+                body: { contains: term, mode: "insensitive" },
+              },
+            },
+          },
         ];
       }
     }
@@ -215,9 +235,12 @@ export class ConversationsService {
       });
     }
 
-    return messages.map((message: MessageWithRelations) =>
-      this.toMessageResponse(message),
-    );
+    return {
+      messages: messages.map((message: MessageWithRelations) =>
+        this.toMessageResponse(message),
+      ),
+      markedAsRead,
+    };
   }
 
   async createOutboundMessage(
@@ -229,16 +252,17 @@ export class ConversationsService {
     const normalizedText = text.trim();
 
     const message = await this.prisma.$transaction(async (tx) => {
-      const conversation = await tx.conversation.findFirst({
-        where: {
-          id: conversationId,
-          organizationId,
-        },
-        select: {
-          id: true,
-          status: true,
-        },
-      });
+      // Lock the row to prevent a concurrent resolve from slipping in
+      // between the status check and the message insert.
+      const rows = await tx.$queryRawUnsafe<
+        { id: string; status: string }[]
+      >(
+        `SELECT id, status FROM "Conversation" WHERE id = $1 AND "organizationId" = $2 FOR UPDATE`,
+        conversationId,
+        organizationId,
+      );
+
+      const conversation = rows[0];
 
       if (!conversation) {
         throw new NotFoundException("Conversation not found");
@@ -314,91 +338,141 @@ export class ConversationsService {
     conversationId: string,
     membershipId: string | null,
   ) {
-    const conversation = await this.getConversationInOrganization(
-      organizationId,
-      conversationId,
-    );
-
-    let targetUserId: string | null = null;
-    if (membershipId !== null) {
-      const targetMembership = await this.prisma.membership.findFirst({
-        where: {
-          id: membershipId,
-          organizationId,
-        },
+    const assignment = await this.prisma.$transaction(async (tx) => {
+      const conversation = await tx.conversation.findFirst({
+        where: { id: conversationId, organizationId },
         select: {
           id: true,
-          user: {
-            select: { id: true },
-          },
-        },
-      });
-
-      if (!targetMembership) {
-        throw new BadRequestException(
-          "Membership not found in this organization",
-        );
-      }
-
-      targetUserId = targetMembership.user.id;
-    }
-
-    const updatedConversation = await this.prisma.conversation.update({
-      where: { id: conversation.id },
-      data: {
-        assignedMembershipId: membershipId,
-      },
-      select: {
-        id: true,
-        assignedMembership: {
-          select: {
-            id: true,
-            user: {
-              select: {
-                id: true,
-                name: true,
-                email: true,
+          assignedMembershipId: true,
+          assignedMembership: {
+            select: {
+              id: true,
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
               },
             },
           },
         },
-      },
-    });
+      });
 
-    await this.prisma.auditLog.create({
-      data: {
-        action:
-          membershipId === null
-            ? "conversation.unassigned"
-            : "conversation.assigned",
-        targetId: conversation.id,
-        metadata: {
-          assignedTo: targetUserId,
-        },
-        organizationId,
-        actorId: actorUserId,
-      },
-    });
+      if (!conversation) {
+        throw new NotFoundException("Conversation not found");
+      }
 
-    const result = {
-      id: updatedConversation.id,
-      assignedMembership: updatedConversation.assignedMembership
-        ? {
-            id: updatedConversation.assignedMembership.id,
+      let targetUserId: string | null = null;
+      if (membershipId !== null) {
+        const targetMembership = await tx.membership.findFirst({
+          where: {
+            id: membershipId,
+            organizationId,
+          },
+          select: {
+            id: true,
             user: {
-              id: updatedConversation.assignedMembership.user.id,
-              name: updatedConversation.assignedMembership.user.name,
-              email: updatedConversation.assignedMembership.user.email,
+              select: { id: true },
             },
-          }
-        : null,
-    };
-    this.eventsService.emit(organizationId, {
-      type: "conversation.updated",
-      conversationId,
-      payload: { action: membershipId === null ? "unassigned" : "assigned", ...result },
+          },
+        });
+
+        if (!targetMembership) {
+          throw new BadRequestException(
+            "Membership not found in this organization",
+          );
+        }
+
+        targetUserId = targetMembership.user.id;
+      }
+
+      if (conversation.assignedMembershipId === membershipId) {
+        return {
+          changed: false,
+          action: membershipId === null ? "unassigned" : "assigned",
+          result: this.toAssignmentResponse(conversation),
+        };
+      }
+
+      const updateResult = await tx.conversation.updateMany({
+        where: {
+          id: conversation.id,
+          organizationId,
+          assignedMembershipId: conversation.assignedMembershipId,
+        },
+        data: {
+          assignedMembershipId: membershipId,
+        },
+      });
+
+      const currentConversation = await tx.conversation.findFirst({
+        where: { id: conversation.id, organizationId },
+        select: {
+          id: true,
+          assignedMembershipId: true,
+          assignedMembership: {
+            select: {
+              id: true,
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (!currentConversation) {
+        throw new NotFoundException("Conversation not found");
+      }
+
+      if (updateResult.count === 0) {
+        if (currentConversation.assignedMembershipId === membershipId) {
+          return {
+            changed: false,
+            action: membershipId === null ? "unassigned" : "assigned",
+            result: this.toAssignmentResponse(currentConversation),
+          };
+        }
+
+        throw new ConflictException("Conversation assignment changed, please retry");
+      }
+
+      await tx.auditLog.create({
+        data: {
+          action:
+            membershipId === null
+              ? "conversation.unassigned"
+              : "conversation.assigned",
+          targetId: conversation.id,
+          metadata: {
+            assignedTo: targetUserId,
+          },
+          organizationId,
+          actorId: actorUserId,
+        },
+      });
+
+      return {
+        changed: true,
+        action: membershipId === null ? "unassigned" : "assigned",
+        result: this.toAssignmentResponse(currentConversation),
+      };
     });
-    return result;
+
+    if (assignment.changed) {
+      this.eventsService.emit(organizationId, {
+        type: "conversation.updated",
+        conversationId,
+        payload: { action: assignment.action, ...assignment.result },
+      });
+    }
+
+    return assignment.result;
   }
 
   async updateConversationStatus(
@@ -594,25 +668,11 @@ export class ConversationsService {
         create: { name, organizationId },
       });
 
-      const existingLink = await tx.conversationTag.findUnique({
-        where: {
-          conversationId_tagId: {
-            conversationId: conversation.id,
-            tagId: tag.id,
-          },
-        },
-      });
-
-      if (!existingLink) {
-        await tx.conversationTag.upsert({
-          where: {
-            conversationId_tagId: {
-              conversationId: conversation.id,
-              tagId: tag.id,
-            },
-          },
-          update: {},
-          create: { conversationId: conversation.id, tagId: tag.id },
+      // Use create + catch unique violation so the audit log is only
+      // written when this request actually inserted the link row.
+      try {
+        await tx.conversationTag.create({
+          data: { conversationId: conversation.id, tagId: tag.id },
         });
 
         await tx.auditLog.create({
@@ -627,6 +687,16 @@ export class ConversationsService {
             actorId: actorUserId,
           },
         });
+      } catch (error) {
+        // P2002 = unique constraint violation — tag already linked
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2002"
+        ) {
+          // no-op: tag already exists on this conversation
+        } else {
+          throw error;
+        }
       }
 
       return { tag };
@@ -734,6 +804,22 @@ export class ConversationsService {
         message.direction === MessageDirection.INBOUND
           ? message.conversation.contactName
           : message.sender?.name ?? null,
+    };
+  }
+
+  private toAssignmentResponse(conversation: ConversationAssignmentRecord) {
+    return {
+      id: conversation.id,
+      assignedMembership: conversation.assignedMembership
+        ? {
+            id: conversation.assignedMembership.id,
+            user: {
+              id: conversation.assignedMembership.user.id,
+              name: conversation.assignedMembership.user.name,
+              email: conversation.assignedMembership.user.email,
+            },
+          }
+        : null,
     };
   }
 }
