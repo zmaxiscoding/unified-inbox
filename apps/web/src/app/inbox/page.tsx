@@ -304,11 +304,16 @@ export default function InboxPage() {
           throw new Error(`Messages fetch failed: ${response.status}`);
         }
 
-        const data = (await response.json()) as Message[];
+        const data = (await response.json()) as {
+          messages: Message[];
+          markedAsRead: boolean;
+        };
         if (activeConversationRef.current !== conversationId) return;
 
-        setMessages(data);
-        applyConversationRead(conversationId);
+        setMessages(data.messages);
+        if (data.markedAsRead) {
+          applyConversationRead(conversationId);
+        }
       } catch {
         if (activeConversationRef.current === conversationId) {
           setErrorMessage("Mesajlar alınırken hata oluştu.");
