@@ -53,15 +53,16 @@ describe("ChannelsController", () => {
     expect(service.listChannels).toHaveBeenCalledWith("org_1");
   });
 
-  it("should reject channel settings reads for AGENT role", () => {
-    expect(() =>
-      controller.listChannels({
-        ...session,
-        role: "AGENT",
-      }),
-    ).toThrow("Only owners can view channel settings");
+  it("should allow AGENT role to read channel list", async () => {
+    service.listChannels.mockResolvedValue([{ id: "ca_1" }]);
 
-    expect(service.listChannels).not.toHaveBeenCalled();
+    const result = await controller.listChannels({
+      ...session,
+      role: "AGENT",
+    });
+
+    expect(result).toEqual([{ id: "ca_1" }]);
+    expect(service.listChannels).toHaveBeenCalledWith("org_1");
   });
 
   it("should connect whatsapp via service", async () => {

@@ -26,7 +26,6 @@ export class ChannelsController {
 
   @Get()
   listChannels(@Session() session: SessionPayload) {
-    this.assertOwner(session, "Only owners can view channel settings");
     return this.channelsService.listChannels(session.organizationId);
   }
 
