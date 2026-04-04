@@ -726,7 +726,8 @@ async function handleApiRoute(route: Route, state: State) {
       return;
     }
 
-    await fulfillJson(route, 200, state.messagesByConversation[messageMatch[1]] ?? []);
+    const msgs = state.messagesByConversation[messageMatch[1]] ?? [];
+    await fulfillJson(route, 200, { messages: msgs, markedAsRead: true });
     return;
   }
 
